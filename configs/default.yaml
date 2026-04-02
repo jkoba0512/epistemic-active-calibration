@@ -1,0 +1,32 @@
+# AIF Occlusion Manipulator — default configuration
+
+precision:
+  theta: 0.4           # occlusion threshold for c_visual
+  pi_tactile_max: 5.0  # max tactile precision weight
+  pi_visual_min: 0.1   # min visual precision weight (floor)
+  visual_modality_idx: 0
+
+generative_model:
+  policy_len: 2
+  inference_horizon: 2
+  # Phase 1: simplified 1-DoF proxy
+  n_arm_positions: 5
+  n_object_locations: 3
+
+discretizer:
+  joint:
+    n_bins: 20
+    angle_min: -1.5708   # -pi/2
+    angle_max:  1.5708   #  pi/2
+  contact:
+    thresholds: [0.3, 0.7]
+    labels: [no_contact, light_contact, strong_contact]
+
+simulation:
+  max_steps: 50
+  object_position: 2   # index into n_object_locations
+
+wandb:
+  enabled: false
+  project: aif-occlusion
+  entity: null

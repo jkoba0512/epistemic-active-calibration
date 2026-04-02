@@ -1,0 +1,107 @@
+<!--
+  SO-101 Occlusion Manipulator Scene
+  ====================================
+  SO-101 arm (shoulder_pan only, others locked) sweeps gripper in XY plane.
+  Table at z=0.125, object at one of 3 Y positions on the table.
+  Camera views from the front. Occluder panel blocks camera when enabled.
+
+  Joint configuration (locked via keyframe):
+    shoulder_pan   : actuated, sweeps gripper left/right
+    shoulder_lift  : -0.70 rad (fixed)
+    elbow_flex     :  0.80 rad (fixed)
+    wrist_flex     :  0.40 rad (fixed)
+    wrist_roll     :  0.00 rad (fixed)
+    gripper        :  0.50 rad (open, fixed)
+
+  Gripper tip at: x≈0.298, z≈0.147 (same height as original scene)
+
+  Object Y positions:
+    Left   (idx 0): Y = -0.08
+    Center (idx 1): Y =  0.00
+    Right  (idx 2): Y = +0.08
+-->
+<mujoco model="so101_occlusion">
+  <compiler angle="radian" meshdir="so101/assets" autolimits="true"/>
+  <option gravity="0 0 -9.81" timestep="0.002" integrator="implicitfast"
+          iterations="10" ls_iterations="20" impratio="10"/>
+
+  <visual>
+    <headlight ambient="0.45 0.45 0.45" diffuse="0.7 0.7 0.7" specular="0.05 0.05 0.05"/>
+    <rgba haze="0.15 0.15 0.2 1"/>
+    <global offwidth="800" offheight="600"/>
+  </visual>
+
+  <!-- Include SO-101 robot model -->
+  <include file="so101/so101.xml"/>
+
+  <asset>
+    <material name="table_mat" rgba="0.8 0.72 0.52 1"/>
+    <material name="obj_mat"   rgba="0.92 0.32 0.10 1"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 1.5"   dir="0 0 -1"    directional="true" diffuse="0.6 0.6 0.6"/>
+    <light pos="-1 -1 1.5" dir="1 1 -1"    directional="true" diffuse="0.4 0.4 0.4"/>
+    <light pos="1  0.5 1"  dir="-1 -0.5 -1" directional="true" diffuse="0.3 0.3 0.3"/>
+    <geom name="floor" type="plane" size="1 1 0.01" rgba="0.55 0.55 0.55 1"/>
+
+    <!-- Table: top surface at z=0.108 (= 0.130 - 0.022 object half-height) -->
+    <body name="table" pos="0.286 0 0">
+      <geom name="table_top" type="box"
+            size="0.10 0.18 0.0125" pos="0 0 0.0955" material="table_mat"
+            contype="0" conaffinity="0"/>
+      <geom name="table_leg" type="box"
+            size="0.015 0.015 0.0428" pos="0 0 0.0428" rgba="0.50 0.40 0.30 1"
+            contype="0" conaffinity="0"/>
+    </body>
+
+    <!-- Object: thin cylinder post (radius=5mm, half-height=40mm).
+         contype=2 / conaffinity=2 → collides ONLY with collision_gripper
+         (fingertip spheres, contype=2), not with arm-body geoms (contype=1).
+         This ensures only the gripper fingertip can trigger contact,
+         even as the arm body sweeps past at ~31mm clearance. -->
+    <body name="object" pos="0.284 0 0.129" mocap="true">
+      <geom name="obj_geom" type="cylinder" size="0.005 0.040" material="obj_mat"
+            contype="2" conaffinity="2" solimp="0.99 0.99 0.01" solref="0.01 1"/>
+    </body>
+
+    <!-- Occluder: moved to (0.15, 0, 0.25) when occlusion active -->
+    <body name="occluder" pos="5.0 0 0" mocap="true">
+      <geom name="occ_geom" type="box" size="0.008 0.20 0.22"
+            rgba="0.20 0.20 0.90 0.85" contype="0" conaffinity="0"/>
+    </body>
+
+    <!-- Touch sensor sites are defined in so101/so101.xml (attached to gripper bodies) -->
+
+    <!-- Cameras -->
+    <camera name="main_camera"  pos="0.298 -0.70 0.50" xyaxes="1 0 0  0.18 0.12 1"/>
+    <camera name="close_camera" pos="0.298 -0.38 0.32" xyaxes="1 0 0  0 0.28 1"/>
+    <camera name="top_camera"   pos="0.298 0 1.00"     xyaxes="1 0 0  0 1 0"/>
+    <camera name="side_camera"  pos="0.68 0.0 0.35"    xyaxes="0 1 0  -0.45 0 1"/>
+  </worldbody>
+
+  <!-- Lock all joints except shoulder_pan at their reach-pose angles.
+       polycoef="a0 0 0 0 0" with no joint2 constrains joint1 = a0 (constant). -->
+  <equality>
+    <joint name="lock_shoulder_lift" joint1="shoulder_lift" polycoef="-0.70 0 0 0 0"/>
+    <joint name="lock_elbow_flex"    joint1="elbow_flex"    polycoef=" 0.80 0 0 0 0"/>
+    <joint name="lock_wrist_flex"    joint1="wrist_flex"    polycoef=" 0.40 0 0 0 0"/>
+    <joint name="lock_wrist_roll"    joint1="wrist_roll"    polycoef=" 0.00 0 0 0 0"/>
+    <joint name="lock_gripper"       joint1="gripper"       polycoef=" 0.50 0 0 0 0"/>
+  </equality>
+
+  <!-- Actuators are defined in so101/so101.xml (shoulder_pan = ctrl[0]) -->
+
+  <sensor>
+    <!-- Touch sensors on gripper jaw tips (sites defined in so101/so101.xml) -->
+    <touch name="gripper_touch_fixed"  site="touch_fixed_jaw"/>
+    <touch name="gripper_touch_moving" site="touch_moving_jaw"/>
+  </sensor>
+
+  <!-- Initial pose keyframe -->
+  <keyframe>
+    <key name="reach_pose"
+         qpos="0 -0.70 0.80 0.40 0.00 0.50"/>
+  </keyframe>
+
+</mujoco>

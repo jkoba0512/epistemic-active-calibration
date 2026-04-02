@@ -1,0 +1,128 @@
+<!--
+  Occlusion Manipulator Scene
+  ===========================
+  L-shaped arm (shoulder-only control) sweeping in XY plane.
+  Table at z=0.125, object at one of 3 Y positions on the table.
+  Camera views from the front. Occluder panel blocks camera when enabled.
+
+  Geometry:
+    - Shoulder at z=0.30 sweeps upper arm (horizontal, +X, 0.30m)
+    - Elbow rigid: lower arm goes straight down (0.153m)
+    - Fingertip at z = 0.30 - 0.153 = 0.147 = object center height
+
+  Object Y positions (set via mocap_pos in code):
+    Left   (idx 0): Y = -0.08  -> shoulder ≈ -0.26 rad
+    Center (idx 1): Y =  0.00  -> shoulder =  0.00 rad
+    Right  (idx 2): Y = +0.08  -> shoulder ≈ +0.26 rad
+-->
+<mujoco model="occlusion_manipulator">
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81" timestep="0.002"/>
+
+  <visual>
+    <headlight ambient="0.45 0.45 0.45" diffuse="0.7 0.7 0.7" specular="0.05 0.05 0.05"/>
+    <rgba haze="0.15 0.15 0.2 1"/>
+    <global offwidth="800" offheight="600"/>
+  </visual>
+
+  <asset>
+    <material name="table_mat" rgba="0.8 0.72 0.52 1"/>
+    <material name="arm_mat"   rgba="0.60 0.62 0.72 1"/>
+    <material name="obj_mat"   rgba="0.92 0.32 0.10 1"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 1.5"   dir="0 0 -1"    directional="true" diffuse="0.6 0.6 0.6"/>
+    <light pos="-1 -1 1.5" dir="1 1 -1"    directional="true" diffuse="0.4 0.4 0.4"/>
+    <light pos="1  0.5 1"  dir="-1 -0.5 -1" directional="true" diffuse="0.3 0.3 0.3"/>
+    <geom name="floor" type="plane" size="1 1 0.01" rgba="0.55 0.55 0.55 1"/>
+
+    <!-- Table: top surface at z = 0.0 + 0.1125 + 0.0125 = 0.125 -->
+    <!-- contype/conaffinity=0: table is visual only; fingertip must not collide  -->
+    <!-- with the leg as the arm sweeps (leg is at X=0.3, arm passes through it). -->
+    <body name="table" pos="0.3 0 0">
+      <geom name="table_top" type="box"
+            size="0.10 0.18 0.0125" pos="0 0 0.1125" material="table_mat"
+            contype="0" conaffinity="0"/>
+      <!-- Leg: from floor (z=0) to underside of table_top (z=0.10).
+           half-height=0.05 → centre z=0.05 → top z=0.10, bottom z=0.00 -->
+      <geom name="table_leg" type="box"
+            size="0.015 0.015 0.05" pos="0 0 0.05" rgba="0.50 0.40 0.30 1"
+            contype="0" conaffinity="0"/>
+    </body>
+
+    <!-- Object: mocap body, center at z=0.147 (table_top + box half-height 0.022) -->
+    <!-- Mocap initial pos at center (obj_loc=1) -->
+    <body name="object" pos="0.3 0 0.147" mocap="true">
+      <geom name="obj_geom" type="box" size="0.022 0.022 0.022" material="obj_mat"
+            solimp="0.99 0.99 0.01" solref="0.01 1"/>
+    </body>
+
+    <!-- Occluder: mocap body, invisible to contacts (contype=0) -->
+    <!-- Default far away; moved to (0.15, 0, 0.25) when occlusion is active -->
+    <body name="occluder" pos="5.0 0 0" mocap="true">
+      <geom name="occ_geom" type="box" size="0.008 0.20 0.22"
+            rgba="0.20 0.20 0.90 0.85" contype="0" conaffinity="0"/>
+    </body>
+
+    <!-- Arm base pillar (fixed) -->
+    <body name="arm_base" pos="0 0 0">
+      <geom type="cylinder" size="0.030 0.15" pos="0 0 0.15" rgba="0.35 0.35 0.35 1"/>
+
+      <!-- Shoulder: hinge around Z (vertical), sweeps arm in XY plane -->
+      <body name="shoulder_body" pos="0 0 0.30">
+        <joint name="shoulder" type="hinge" axis="0 0 1" range="-0.50 0.50"/>
+
+        <!-- Upper arm: horizontal capsule along +X, length 0.30m -->
+        <geom name="upper_arm" type="capsule"
+              fromto="0 0 0 0.30 0 0" size="0.016" material="arm_mat"/>
+
+        <!-- Elbow: rigid body at tip of upper arm -->
+        <body name="elbow_body" pos="0.30 0 0">
+          <!-- Lower arm: vertical capsule along -Z, length 0.148m -->
+          <!-- Fingertip center z = 0.30 - 0.148 = 0.152.                           -->
+          <!-- Sphere bottom    z = 0.152 - 0.023 = 0.129 (4mm above table=0.125).  -->
+          <!-- Object center    z = 0.147; sphere overlaps [0.129,0.175] → contact. -->
+          <geom name="lower_arm" type="capsule"
+                fromto="0 0 0 0 0 -0.148" size="0.013" material="arm_mat"/>
+
+          <!-- Fingertip: sphere at bottom of lower arm -->
+          <!-- z=-0.148: 4mm clearance above table (soft-contact zone safe).        -->
+          <site name="fingertip" pos="0 0 -0.148" size="0.023"/>
+          <geom name="fingertip_geom" type="sphere" size="0.023" pos="0 0 -0.148"
+                material="arm_mat" solimp="0.99 0.99 0.01" solref="0.01 1"/>
+        </body>
+      </body>
+    </body>
+
+    <!-- Cameras -->
+    <!-- main_camera: frontal view, sees object and potential occluder -->
+    <camera name="main_camera" pos="0.3 -0.70 0.50"
+            xyaxes="1 0 0  0.18 0.12 1"/>
+    <!-- top_camera: bird-eye view for debugging -->
+    <camera name="top_camera" pos="0.3 0 1.00"
+            xyaxes="1 0 0  0 1 0"/>
+    <!-- close_camera: close-up frontal view centered on workspace
+         pos=(0.30, -0.38, 0.32): X=table center, Y=close front, Z≈fingertip height+0.17
+         xyaxes: x=world+X (right in image), y≈world+Z tilted toward target -->
+    <camera name="close_camera" pos="0.3 -0.38 0.32"
+            xyaxes="1 0 0  0 0.28 1"/>
+    <!-- side_camera: looking from +X direction, shows Y-axis sweep (left/right)
+         pos=(0.68, 0.0, 0.35): from +X side, middle height
+         xyaxes: x=world+Y (sweep direction is left-right), y=world+Z tilted up -->
+    <camera name="side_camera" pos="0.68 0.0 0.35"
+            xyaxes="0 1 0  -0.45 0 1"/>
+  </worldbody>
+
+  <actuator>
+    <!-- Position servo on shoulder only -->
+    <position name="shoulder_act" joint="shoulder"
+              kp="40" dampratio="1" forcerange="-8 8"/>
+  </actuator>
+
+  <sensor>
+    <!-- Touch sensor at fingertip site -->
+    <touch name="fingertip_touch" site="fingertip"/>
+  </sensor>
+
+</mujoco>

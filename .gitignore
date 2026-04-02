@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment
+.venv/
+
+# Tool caches
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+
+# Claude Code personal files
+.claude/
+aif_occlusion_manipulator.md
+
+# Generated figures (reproducible via paper/make_figures.py)
+paper/figures/
+
+# Generated docs
+docs/overview.pdf
+
+# Executed notebooks (keep clean versions only)
+notebooks/*_executed.ipynb
+notebooks/*.png
+
+# Intermediate results
+results/*.png
+results/*.mp4
+results/overview/
+results/so101_overview/
+
+# Exploratory / debug scripts
+experiments/debug_*.py
+experiments/find_so101_pose*.py
+experiments/figure_option_c.py
+experiments/render_*.py
+
+# OS
+.DS_Store
+Thumbs.db
