@@ -15,6 +15,7 @@ __pycache__/
 
 # Claude Code personal files
 .claude/
+aif_calib_robustness.md
 aif_occlusion_manipulator.md
 
 # Generated figures (reproducible via paper/make_figures.py)
@@ -22,6 +23,19 @@ paper/figures/
 
 # Generated docs
 docs/overview.pdf
+
+# LaTeX build artifacts
+texput.log
+paper/*.aux
+paper/*.log
+paper/*.blg
+paper/*.bbl
+paper/*.out
+paper/logo*-eps-converted-to.pdf
+paper/*.pdf
+
+# Run logs
+results/*.log
 
 # Executed notebooks (keep clean versions only)
 notebooks/*_executed.ipynb

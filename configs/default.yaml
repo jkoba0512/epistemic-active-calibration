@@ -1,4 +1,4 @@
-# AIF Occlusion Manipulator — default configuration
+# AIF Calibration Robustness — default configuration
 
 precision:
   theta: 0.4           # occlusion threshold for c_visual
@@ -28,5 +28,5 @@ simulation:
 
 wandb:
   enabled: false
-  project: aif-occlusion
+  project: aif-calib-robustness
   entity: null

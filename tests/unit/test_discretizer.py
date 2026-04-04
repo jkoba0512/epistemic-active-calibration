@@ -7,7 +7,7 @@ Core claim: encode(decode(x)) ≈ x within quantization error.
 import numpy as np
 import pytest
 
-from aif_occlusion.utils.discretizer import JointDiscretizer, ContactDiscretizer
+from aif_calib_robustness.utils.discretizer import JointDiscretizer, ContactDiscretizer
 
 
 class TestJointDiscretizer:

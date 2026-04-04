@@ -17,7 +17,7 @@ import numpy as np
 
 from pymdp.legacy.agent import Agent
 
-from aif_occlusion.core.precision.precision_manager import PrecisionManager, PrecisionWeights
+from aif_calib_robustness.core.precision.precision_manager import PrecisionManager, PrecisionWeights
 
 
 @dataclass

@@ -1,5 +1,5 @@
 [project]
-name = "aif-occlusion-manipulator"
+name = "aif-calib-robustness"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -13,6 +13,7 @@ dependencies = [
     "mujoco>=3.6.0",
     "notebook>=7.5.5",
     "pyyaml>=6.0.3",
+    "statsmodels>=0.14.6",
 ]
 
 [tool.uv]
@@ -29,7 +30,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/aif_occlusion"]
+packages = ["src/aif_calib_robustness"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

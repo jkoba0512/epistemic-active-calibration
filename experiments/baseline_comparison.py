@@ -40,12 +40,12 @@ from scipy import stats as scipy_stats
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from aif_occlusion.core.generative_model.model_builder import (
+from aif_calib_robustness.core.generative_model.model_builder import (
     DEFAULT_OBJ_ARM, build_A, build_B, build_C, build_D,
 )
-from aif_occlusion.core.generative_model.multimodal_agent import MultiModalAIFAgent
-from aif_occlusion.core.precision.precision_manager import PrecisionManager
-from aif_occlusion.simulation.mujoco_env import OcclusionManipulatorEnv
+from aif_calib_robustness.core.generative_model.multimodal_agent import MultiModalAIFAgent
+from aif_calib_robustness.core.precision.precision_manager import PrecisionManager
+from aif_calib_robustness.simulation.mujoco_env import OcclusionManipulatorEnv
 
 N_POS     = 5
 N_OBJ     = 3

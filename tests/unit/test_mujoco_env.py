@@ -16,7 +16,7 @@ import pytest
 
 pytest.importorskip("mujoco", reason="mujoco not installed")
 
-from aif_occlusion.simulation.mujoco_env import (
+from aif_calib_robustness.simulation.mujoco_env import (
     OcclusionManipulatorEnv,
     N_VISUAL_OBS,
     _CONTACT_ANGLES,

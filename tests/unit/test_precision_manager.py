@@ -11,7 +11,7 @@ import copy
 import numpy as np
 import pytest
 
-from aif_occlusion.core.precision.precision_manager import PrecisionManager
+from aif_calib_robustness.core.precision.precision_manager import PrecisionManager
 
 
 @pytest.fixture

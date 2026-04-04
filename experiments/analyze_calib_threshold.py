@@ -22,8 +22,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from aif_occlusion.utils.discretizer import JointDiscretizer
-from aif_occlusion.simulation.so101_env import _CONTACT_ANGLES, _SHOULDER_MIN, _SHOULDER_MAX
+from aif_calib_robustness.utils.discretizer import JointDiscretizer
+from aif_calib_robustness.simulation.so101_env import _CONTACT_ANGLES, _SHOULDER_MIN, _SHOULDER_MAX
 
 N_BINS    = 5
 STEP_SIZE = (_SHOULDER_MAX - _SHOULDER_MIN) / (N_BINS - 1)  # 0.20 rad

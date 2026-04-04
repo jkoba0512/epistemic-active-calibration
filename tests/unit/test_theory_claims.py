@@ -20,8 +20,8 @@ import pytest
 from pymdp.legacy import utils
 from pymdp.legacy.agent import Agent
 
-from aif_occlusion.core.generative_model.multimodal_agent import MultiModalAIFAgent
-from aif_occlusion.core.precision.precision_manager import PrecisionManager
+from aif_calib_robustness.core.generative_model.multimodal_agent import MultiModalAIFAgent
+from aif_calib_robustness.core.precision.precision_manager import PrecisionManager
 
 
 # ---------------------------------------------------------------------------

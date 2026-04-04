@@ -13,12 +13,12 @@ pytest.importorskip("mujoco", reason="mujoco not installed")
 from pymdp.legacy import utils
 from pymdp.legacy.agent import Agent
 
-from aif_occlusion.simulation.mujoco_env import (
+from aif_calib_robustness.simulation.mujoco_env import (
     OcclusionManipulatorEnv,
     N_VISUAL_OBS,
     _CONTACT_ANGLES,
 )
-from aif_occlusion.core.precision.precision_manager import PrecisionManager
+from aif_calib_robustness.core.precision.precision_manager import PrecisionManager
 
 # ---------------------------------------------------------------------------
 # Constants matching the generative model

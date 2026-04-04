@@ -26,7 +26,7 @@ try:
 except ImportError:
     HAS_MUJOCO = False
 
-from aif_occlusion.utils.discretizer import JointDiscretizer, ContactDiscretizer
+from aif_calib_robustness.utils.discretizer import JointDiscretizer, ContactDiscretizer
 
 # ---------------------------------------------------------------------------
 # Scene constants

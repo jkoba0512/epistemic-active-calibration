@@ -1,5 +1,5 @@
 def main():
-    print("Hello from aif-occlusion-manipulator!")
+    print("Hello from aif-calib-robustness!")
 
 
 if __name__ == "__main__":

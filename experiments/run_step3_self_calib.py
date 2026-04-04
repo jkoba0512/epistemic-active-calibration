@@ -30,12 +30,12 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from aif_occlusion.core.generative_model.model_builder import (
+from aif_calib_robustness.core.generative_model.model_builder import (
     build_A, build_B, build_C, build_D, DEFAULT_OBJ_ARM,
 )
-from aif_occlusion.core.generative_model.multimodal_agent import MultiModalAIFAgent
-from aif_occlusion.core.precision.precision_manager import PrecisionManager
-from aif_occlusion.simulation.so101_env import SO101OcclusionEnv
+from aif_calib_robustness.core.generative_model.multimodal_agent import MultiModalAIFAgent
+from aif_calib_robustness.core.precision.precision_manager import PrecisionManager
+from aif_calib_robustness.simulation.so101_env import SO101OcclusionEnv
 
 N_POS    = 5
 N_OBJ    = 3
