@@ -10,7 +10,7 @@ from typing import Any, Callable
 import jax
 import jax.numpy as jnp
 
-from src.dem.core import make_D_matrix, make_tilde_precision
+from .core import make_D_matrix, make_tilde_precision
 
 
 @dataclass
@@ -37,7 +37,10 @@ class DEMModel:
         pi_x: State noise precision scalar.
         s_y: Smoothness parameter for observation noise.
         s_x: Smoothness parameter for state noise.
-        params: Model parameters passed to f and g.
+        params: Model parameters θ passed to f and g (initial values for E-step).
+        params_prior_mean: Prior mean for θ used in E-step. If None, defaults
+            to the current params value at E-step initialization.
+        params_prior_pi: Prior precision scalar for θ in E-step (default 1.0).
     """
 
     f: Callable
@@ -51,6 +54,8 @@ class DEMModel:
     s_y: float = 1.0
     s_x: float = 1.0
     params: Any = None
+    params_prior_mean: Any = None  # Prior mean for θ (E-step)
+    params_prior_pi: float = 1.0  # Prior precision for θ (E-step)
 
     def __post_init__(self) -> None:
         """Precompute derived matrices."""

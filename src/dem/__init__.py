@@ -7,20 +7,22 @@ Modules:
     core: Mathematical foundations (D operator, R matrix, generalized coordinates)
     model: Generative model base class and linear model
     inference: D-step (state inference via VFE minimization)
+    estep: E-step (parameter inference via accumulated VFE gradient)
     action: Action update (ADEM action update)
     agent: DEMAgent / ADEMAgent (integration classes)
 """
 
-from src.dem.core import (
+from .core import (
     make_D_matrix,
     make_R_matrix,
     make_tilde_precision,
     shift_operator,
 )
-from src.dem.model import DEMModel, LinearDEMModel
-from src.dem.inference import DStep, compute_vfe
-from src.dem.action import ActionUpdate
-from src.dem.agent import DEMAgent, ADEMAgent
+from .model import DEMModel, LinearDEMModel
+from .inference import DStep, compute_vfe
+from .estep import EStep
+from .action import ActionUpdate
+from .agent import DEMAgent, ADEMAgent
 
 __all__ = [
     "make_D_matrix",
@@ -31,6 +33,7 @@ __all__ = [
     "LinearDEMModel",
     "DStep",
     "compute_vfe",
+    "EStep",
     "ActionUpdate",
     "DEMAgent",
     "ADEMAgent",

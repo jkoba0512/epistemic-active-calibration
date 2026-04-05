@@ -11,8 +11,8 @@ from typing import Callable, Tuple
 import jax
 import jax.numpy as jnp
 
-from src.dem.model import DEMModel
-from src.dem.inference import compute_vfe
+from .model import DEMModel
+from .inference import compute_vfe
 
 
 class ActionUpdate:
