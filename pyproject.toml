@@ -1,24 +1,13 @@
 [project]
-name = "aif-calib-robustness"
+name = "aif-arm-proprioception"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "imageio[ffmpeg]>=2.37.3",
-    "inferactively-pymdp>=1.0.0",
-    "ipykernel>=7.2.0",
-    "jupyter>=1.1.1",
     "matplotlib>=3.10.8",
-    "mujoco>=3.6.0",
-    "notebook>=7.5.5",
-    "pyyaml>=6.0.3",
-    "statsmodels>=0.14.6",
     "jax>=0.4.30",
     "jaxlib>=0.4.30",
-    "diffrax>=0.6.0",
-    "optax>=0.2.0",
-    "equinox>=0.11.0",
 ]
 
 [tool.uv]
@@ -35,7 +24,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/aif_calib_robustness"]
+packages = ["src/dem"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
