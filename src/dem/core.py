@@ -133,8 +133,13 @@ def make_tilde_precision(
     """
     Pi_base = pi * jnp.eye(n_dim)
     R = make_R_matrix(n_order, s)
-    # Kronecker product: tilde_Pi = Pi_base ⊗ R
-    tilde_Pi = jnp.kron(Pi_base, R)
+    # Kronecker product: tilde_Pi = R ⊗ Pi_base  (order-first layout)
+    # D matrix and generalized functions use order-first layout:
+    #   x_tilde = [x(0), x(1), ..., x(p-1)]  where x(k) ∈ R^n_dim
+    # kron(R, Pi_base) gives block (i*n_dim : (i+1)*n_dim, j*n_dim : (j+1)*n_dim) = R[i,j] * Pi_base
+    # which correctly couples orders i and j within each independent dimension.
+    # For n_dim=1 this is identical to kron(Pi_base, R).
+    tilde_Pi = jnp.kron(R, Pi_base)
     return tilde_Pi
 
 

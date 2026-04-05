@@ -170,7 +170,7 @@ class TestTildePrecision:
                 )
 
     def test_tilde_precision_kronecker_structure(self):
-        """Generalized precision should equal kron(pi*I_n_dim, R)."""
+        """Generalized precision should equal kron(R, pi*I_n_dim) (order-first layout)."""
         pi = 2.0
         n_order = 3
         s = 1.0
@@ -178,10 +178,11 @@ class TestTildePrecision:
 
         Pi_tilde = make_tilde_precision(pi, n_order, s, n_dim)
 
-        # Expected: kron(pi * I_n_dim, R)
+        # Expected: kron(R, pi * I_n_dim)
+        # Order-first layout: block (i*n_dim:(i+1)*n_dim, j*n_dim:(j+1)*n_dim) = R[i,j]*Pi_base
         R = make_R_matrix(n_order, s)
         Pi_base = pi * jnp.eye(n_dim)
-        expected = jnp.kron(Pi_base, R)
+        expected = jnp.kron(R, Pi_base)
 
         np.testing.assert_allclose(Pi_tilde, expected, atol=1e-6,
                                    err_msg="Kronecker structure mismatch")

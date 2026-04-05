@@ -613,3 +613,105 @@ class TestGaussNewtonParamRecovery:
         )
         assert a_estimated < a_init, \
             f"GN did not move in correct direction: {a_estimated:.4f} should be < {a_init}"
+
+
+# ---------------------------------------------------------------------------
+# Nonlinear model: dx/dt = a * x^3
+# ---------------------------------------------------------------------------
+
+def make_cubic_model(
+    a_init: float,
+    pi_y: float = 4.0,
+    pi_x: float = 2.0,
+    n_order: int = 4,
+    params_prior_pi: float = 0.001,
+) -> DEMModel:
+    """Nonlinear model: dx/dt = a * x^3,  y = x.
+
+    The parameter θ = [a] only enters the zeroth-order dynamics.
+    The gradient ∂f/∂a = x^3 is nonlinear in state x (unlike the linear case x).
+    """
+
+    def f(x_tilde: jnp.ndarray, v_tilde: jnp.ndarray, params) -> jnp.ndarray:
+        a = params[0]
+        x0 = x_tilde[0]
+        result = jnp.zeros(n_order)
+        return result.at[0].set(a * x0 ** 3)
+
+    def g(x_tilde: jnp.ndarray, v_tilde: jnp.ndarray, params) -> jnp.ndarray:
+        return x_tilde
+
+    return DEMModel(
+        f=f,
+        g=g,
+        n_x=1,
+        n_v=1,
+        n_y=1,
+        n_order=n_order,
+        pi_y=pi_y,
+        pi_x=pi_x,
+        s_y=1.0,
+        s_x=1.0,
+        params=jnp.array([a_init]),
+        params_prior_mean=jnp.array([a_init]),
+        params_prior_pi=params_prior_pi,
+    )
+
+
+class TestGaussNewtonNonlinear:
+    """E-step tests on genuinely nonlinear dynamics dx/dt = a*x^3."""
+
+    def test_nonlinear_gradient_finite(self):
+        """Gradient for cubic dynamics should be finite."""
+        model = make_cubic_model(a_init=0.5)
+        e_step = EStep(model, use_gauss_newton=False)
+
+        params = jnp.array([0.5])
+        mu_x = jnp.zeros(model.dim_x_tilde).at[0].set(1.0)
+        mu_v = jnp.zeros(model.dim_v_tilde)
+        y_tilde = jnp.zeros(model.dim_y_tilde).at[0].set(0.9).at[1].set(-0.5)
+
+        grad = e_step.accumulate_gradient(mu_x, mu_v, y_tilde, params)
+
+        assert grad.shape == params.shape
+        assert jnp.all(jnp.isfinite(grad)), f"Gradient not finite: {grad}"
+
+    def test_nonlinear_gradient_direction(self):
+        """For dx/dt = a*x^3 at x=1 with true x'=-1 (a_true=-1), gradient
+        should push a downward from a_init=0.5 toward -1."""
+        model = make_cubic_model(a_init=0.5)
+        e_step = EStep(model, use_gauss_newton=False)
+
+        params = jnp.array([0.5])
+        # State consistent with a_true=-1: x=1, x'=a_true*x^3=-1
+        mu_x = jnp.zeros(model.dim_x_tilde).at[0].set(1.0).at[1].set(-1.0)
+        mu_v = jnp.zeros(model.dim_v_tilde)
+        y_tilde = mu_x  # identity observation: y = x
+
+        grad = e_step.accumulate_gradient(mu_x, mu_v, y_tilde, params)
+
+        # Positive gradient → update a -= lr * grad → a decreases from 0.5 toward -1
+        assert float(grad[0]) > 0.0, (
+            f"Gradient should be positive (push a downward): {float(grad[0]):.4f}"
+        )
+
+    def test_nonlinear_gn_gradient_finite(self):
+        """Gauss-Newton gradient and curvature are finite for cubic model."""
+        model = make_cubic_model(a_init=0.5)
+        e_step = EStep(model, use_gauss_newton=True)
+
+        params = jnp.array([0.5])
+        mu_x = jnp.zeros(model.dim_x_tilde).at[0].set(1.0)
+        mu_v = jnp.zeros(model.dim_v_tilde)
+        y_tilde = jnp.zeros(model.dim_y_tilde).at[0].set(0.9)
+
+        dFdp, dFdpp = e_step.accumulate_gauss_newton(mu_x, mu_v, y_tilde, params)
+
+        assert dFdp.shape == params.shape
+        assert dFdpp.shape == (1, 1)
+        assert jnp.all(jnp.isfinite(dFdp)), f"dFdp not finite: {dFdp}"
+        assert jnp.all(jnp.isfinite(dFdpp)), f"dFdpp not finite: {dFdpp}"
+        # GN curvature J^T Pi J = (x^3)^2 * pi_x * R[0,0] >= 0
+        assert float(dFdpp[0, 0]) >= -1e-9, (
+            f"GN curvature should be >= 0: {float(dFdpp[0, 0]):.6f}"
+        )
