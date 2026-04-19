@@ -11,23 +11,30 @@ This repository studies a minimal question:
 The current proof of concept uses a planar 2-DoF arm with unknown link lengths.
 In a deliberately degenerate 1D observation setting, task/VFE-only control can
 stay perfectly still because the current observation already matches the goal.
-That behavior leaves the Fisher information matrix rank-deficient, so the two
-link lengths cannot be identified individually. Adding a parameter epistemic
-term to the A-step makes the controller move into informative configurations,
-improving calibration and the later 2D reaching task.
+That behavior leaves the link lengths poorly identifiable. Adding a
+parameter-information term to the A-step makes the controller move into
+informative configurations, improving calibration and the later 2D reaching
+task.
 
 ## Current Claim
 
 The project currently supports this bounded claim:
 
 > In a 2-DoF link-length identification problem with 1D end-effector
-> observations, feeding the E-step posterior precision back into an epistemic
-> A-step can actively break an observation degeneracy, improve parameter
-> identifiability, and reduce downstream task error.
+> observations, a Fisher-information / information-gain A-step can actively
+> break an observation degeneracy, improve parameter identifiability, and
+> reduce downstream task error.
 
 This is a simulation proof of concept. It does not yet claim general validity
 for high-DoF robots, real hardware, contact-rich settings, strong model
 mismatch, or superiority over classical optimal experimental design.
+
+The latest ablations also narrow the claim: a fixed-prior IG controller and a
+scripted q2 excitation baseline can both break the degeneracy. Thus the current
+evidence supports "information-aware excitation breaks the degeneracy" more
+strongly than "posterior-precision feedback is uniquely necessary." The
+adaptive controller remains useful because it reaches similar calibration with
+lower Phase-1 energy than strong fixed-lambda dual control.
 
 ## Core Idea
 
@@ -59,11 +66,11 @@ The important causal chain in the main experiment is:
 ```text
 degenerate 1D observation
   -> VFE-only remains at q2 = 0
-  -> FIM stays rank-deficient
+  -> selected future observations remain poorly informative
   -> l1 and l2 are not individually calibrated
   -> later 2D reaching task fails
 
-parameter epistemic A-step
+information-aware A-step
   -> moves q2 away from zero
   -> FIM becomes informative
   -> l1 and l2 are calibrated
@@ -232,6 +239,7 @@ Output:
 
 ```text
 results/dual_control_1d_obs.png
+results/dual_control_1d_obs_diagnostics.png
 results/dual_control_1d_obs_summary.json
 ```
 
@@ -240,17 +248,33 @@ Expected qualitative result:
 - `vfe_only`: high parameter RMSE at step 50 and high final 2D task error.
 - `random`: better than VFE-only because it excites the elbow by chance, but
   worse than epistemic dual-control in calibration and downstream task error.
+- `scripted_q2`: a strong heuristic baseline; deliberate q2 excitation improves
+  over random but does not match the best information-gain controllers.
+- `dual_no_precision_feedback`: fixed-prior IG control; shows that posterior
+  precision feedback is not uniquely required in this minimal setting.
 - `dual_weak`, `dual_strong`, `dual_adaptive`: low parameter RMSE and much lower
-  final 2D task error.
+  final 2D task error. `dual_adaptive` uses substantially less Phase-1 energy
+  than strong fixed-lambda control.
 
-Representative medians from the current result set:
+Representative medians from the current result set (`N_SEEDS = 20`):
 
 ```text
-vfe_only     RMSE@50 ~= 0.268   TaskErr@100 ~= 0.135 m   EnergyPh1 ~= 0.000
-random       RMSE@50 ~= 0.041   TaskErr@100 ~= 0.041 m   EnergyPh1 ~= 0.415
-dual_weak    RMSE@50 ~= 0.006   TaskErr@100 ~= 0.014 m   EnergyPh1 ~= 0.668
-dual_strong  RMSE@50 ~= 0.007   TaskErr@100 ~= 0.015 m   EnergyPh1 ~= 0.661
-adaptive     RMSE@50 ~= 0.008   TaskErr@100 ~= 0.012 m   EnergyPh1 ~= 0.350
+vfe_only                    RMSE@50 ~= 0.313   TaskErr@100 ~= 0.139 m   EnergyPh1 ~= 0.000
+random                      RMSE@50 ~= 0.033   TaskErr@100 ~= 0.037 m   EnergyPh1 ~= 0.420
+scripted_q2                 RMSE@50 ~= 0.022   TaskErr@100 ~= 0.027 m   EnergyPh1 ~= 0.289
+dual_no_precision_feedback  RMSE@50 ~= 0.005   TaskErr@100 ~= 0.011 m   EnergyPh1 ~= 0.957
+dual_weak                   RMSE@50 ~= 0.006   TaskErr@100 ~= 0.013 m   EnergyPh1 ~= 0.667
+dual_strong                 RMSE@50 ~= 0.008   TaskErr@100 ~= 0.013 m   EnergyPh1 ~= 0.661
+dual_adaptive               RMSE@50 ~= 0.008   TaskErr@100 ~= 0.015 m   EnergyPh1 ~= 0.354
+```
+
+Failure rates using `RMSE@50 > 0.10` and `TaskErr@100 > 0.05`:
+
+```text
+vfe_only:    RMSE failure 0.90, task failure 0.95
+random:      RMSE failure 0.10, task failure 0.35
+scripted_q2: RMSE failure 0.00, task failure 0.15
+dual_*:      RMSE failure 0.00, task failure 0.00
 ```
 
 ### 4. Lambda Sweep
@@ -305,19 +329,27 @@ uv run python experiments/lambda_sweep.py
 The three-reviewer internal discussion converged on this near-term plan:
 
 1. Keep the claim as a 2-DoF proof of concept.
-2. Make the repository reproducible: README, commands, seeds, outputs, figures.
-3. Add a random exploration baseline to the main dual-control comparison.
-4. Add fixed/scripted exploration if it remains lightweight.
-5. Strengthen tests around `EStep.compute_precision()`.
-6. Report FIM/precision indicators alongside RMSE and task error.
-7. Draft a short workshop-style paper section before expanding to hardware.
+2. Treat the latest main experiment as the current reference result
+   (`N_SEEDS = 20`, random/scripted/fixed-prior/adaptive baselines).
+3. Interpret the ablations conservatively: IG/FIM-aware excitation is the
+   supported mechanism; posterior-precision feedback is not uniquely necessary
+   in this minimal setting.
+4. Add a cost-matched IG/FIM-greedy or OED-style baseline before making stronger
+   comparative claims.
+5. Use `results/dual_control_1d_obs_diagnostics.png` to report q2, information
+   rank, precision, IG, RMSE, and task error together.
+6. Draft a short workshop-style paper section before expanding to hardware.
 
 ## Known Limitations
 
 - The current central result is low-dimensional and simulated.
 - The observation degeneracy is deliberately constructed to expose the mechanism.
-- The current main comparison is strongest against VFE-only; more classical OED
-  and FIM-greedy baselines are still future work.
+- The fixed-prior IG ablation performs very well, so the current evidence does
+  not show that posterior-precision feedback is uniquely required.
+- Scripted q2 excitation is a strong heuristic baseline; the distinctive value
+  of the proposed controller should be framed as autonomous information-aware
+  excitation, not merely any elbow motion.
+- More classical OED and FIM-greedy baselines are still future work.
 - `P_theta` is a local Laplace / Gauss-Newton precision approximation, not a
   guaranteed globally accurate posterior covariance.
 - Real robot safety constraints, latency, friction, calibration targets, and

@@ -8,6 +8,9 @@ Dual-control with epistemic bonus actively moves q2 to improve FIM rank.
 Conditions:
   vfe_only      λ = 0.0   pure task (drives to wrong target, calibration stalls)
   random        u ~ U(-U_MAX, U_MAX) during Phase 1 (task-free excitation)
+  scripted_q2   hand-coded q2 excitation during Phase 1 (strong heuristic baseline)
+  dual_no_precision_feedback
+                λ = 3.0   epistemic objective uses fixed prior precision only
   dual_weak     λ = 0.5   mild epistemic
   dual_strong   λ = 3.0   strong epistemic (exploration-heavy)
   dual_adaptive λ = f(P)  high when uncertain, low when calibrated
@@ -24,6 +27,7 @@ Usage:
 
 Output:
     results/dual_control_1d_obs.png
+    results/dual_control_1d_obs_diagnostics.png
     results/dual_control_1d_obs_summary.json
 """
 
@@ -57,7 +61,7 @@ Q_TARGET = jnp.array([jnp.pi / 3, 0.0])   # reachable with true theta at differe
 DT = 0.05
 N_STEPS = 100
 CHANGE_STEP = 50    # Phase 2 starts here: 2D goal introduced
-N_SEEDS = 10
+N_SEEDS = 20
 U_MAX = 0.8
 LR_ACTION = 0.05
 N_ACTION_ITER = 30
@@ -76,14 +80,28 @@ LAMBDA_SCALE = 0.5
 LR_EPISTEMIC = 0.05
 N_EPISTEMIC_ITER = 30
 
-CONDITIONS = ["vfe_only", "random", "dual_weak", "dual_strong", "dual_adaptive"]
+CONDITIONS = [
+    "vfe_only",
+    "random",
+    "scripted_q2",
+    "dual_no_precision_feedback",
+    "dual_weak",
+    "dual_strong",
+    "dual_adaptive",
+]
 LAMBDA_FIXED = {
     "vfe_only": 0.0,
     "random": 0.0,
+    "scripted_q2": 0.0,
+    "dual_no_precision_feedback": 3.0,
     "dual_weak": 0.5,
     "dual_strong": 3.0,
     "dual_adaptive": None,
 }
+SCRIPTED_Q2_AMP = 0.75
+SCRIPTED_Q2_PERIOD = 18
+PARAM_RMSE_FAILURE_THRESHOLD = 0.10
+TASK_ERR_FAILURE_THRESHOLD = 0.05
 
 # ---------------------------------------------------------------------------
 # Kinematics (2-DOF planar)
@@ -138,6 +156,41 @@ def compute_info_gain(P_theta, fim):
     sign1, ld1 = jnp.linalg.slogdet(P_theta + fim)
     sign0, ld0 = jnp.linalg.slogdet(P_theta)
     return 0.5 * (ld1 - ld0)
+
+def _matrix_diagnostics(mat, threshold=1e-6):
+    """Return rank/eigenvalue diagnostics for a small symmetric matrix."""
+    eigvals = np.linalg.eigvalsh(np.asarray(mat, dtype=float))
+    eigvals = np.maximum(eigvals, 0.0)
+    rank = int(np.sum(eigvals > threshold))
+    min_eig = float(eigvals[0])
+    max_eig = float(eigvals[-1])
+    condition = float(max_eig / max(min_eig, threshold))
+    mat_jittered = np.asarray(mat, dtype=float) + threshold * np.eye(mat.shape[0])
+    sign, logdet = np.linalg.slogdet(mat_jittered)
+    return {
+        "rank": rank,
+        "min_eig": min_eig,
+        "max_eig": max_eig,
+        "condition": condition,
+        "logdet": float(logdet if sign > 0 else np.nan),
+    }
+
+def _summarize(values):
+    arr = np.asarray(values, dtype=float)
+    return {
+        "median": float(np.median(arr)),
+        "mean": float(np.mean(arr)),
+        "std": float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0,
+        "iqr25": float(np.percentile(arr, 25)),
+        "iqr75": float(np.percentile(arr, 75)),
+        "ci95_low": float(np.percentile(arr, 2.5)),
+        "ci95_high": float(np.percentile(arr, 97.5)),
+    }
+
+def scripted_q2_action(t):
+    """Deterministic q2 excitation baseline with no epistemic feedback."""
+    phase = 2.0 * np.pi * (t + 1) / SCRIPTED_Q2_PERIOD
+    return jnp.array([0.0, SCRIPTED_Q2_AMP * np.sin(phase)])
 
 # ---------------------------------------------------------------------------
 # Action optimisation
@@ -212,6 +265,17 @@ def run_one(seed, condition):
     q2_hist = []
     lambda_hist = []
     action_energy_hist = []
+    fim_rank_hist = []
+    fim_logdet_hist = []
+    fim_min_eig_hist = []
+    precision_rank_hist = []
+    precision_logdet_hist = []
+    precision_min_eig_hist = []
+    precision_condition_hist = []
+    data_rank_hist = []
+    data_logdet_hist = []
+    data_min_eig_hist = []
+    info_gain_hist = []
 
     q_hist = []
     v_hist = []
@@ -232,6 +296,9 @@ def run_one(seed, condition):
             if condition == "random":
                 lambda_eff = 0.0
                 u = jnp.array(rng.uniform(-U_MAX, U_MAX, size=(2,)))
+            elif condition == "scripted_q2":
+                lambda_eff = 0.0
+                u = scripted_q2_action(t)
             else:
                 lf = LAMBDA_FIXED[condition]
                 if lf is None:
@@ -239,9 +306,32 @@ def run_one(seed, condition):
                     lambda_eff = LAMBDA_0 / (1.0 + lam_min / LAMBDA_SCALE)
                 else:
                     lambda_eff = lf
-                u = optimize_action(q, theta_est, P_theta, Y_GOAL, lambda_eff, u)
+                P_for_action = (
+                    PARAMS_PRIOR_PI * jnp.eye(2)
+                    if condition == "dual_no_precision_feedback"
+                    else P_theta
+                )
+                u = optimize_action(q, theta_est, P_for_action, Y_GOAL, lambda_eff, u)
             lambda_hist.append(float(lambda_eff))
             action_energy_hist.append(float(jnp.sum(u**2)))
+
+            fim_action = compute_fim(q, u, theta_est)
+            ig_action = compute_info_gain(P_theta, fim_action)
+            fim_diag = _matrix_diagnostics(fim_action)
+            precision_diag = _matrix_diagnostics(P_theta)
+            data_info = P_theta - PARAMS_PRIOR_PI * jnp.eye(2)
+            data_diag = _matrix_diagnostics(data_info)
+            fim_rank_hist.append(fim_diag["rank"])
+            fim_logdet_hist.append(fim_diag["logdet"])
+            fim_min_eig_hist.append(fim_diag["min_eig"])
+            precision_rank_hist.append(precision_diag["rank"])
+            precision_logdet_hist.append(precision_diag["logdet"])
+            precision_min_eig_hist.append(precision_diag["min_eig"])
+            precision_condition_hist.append(precision_diag["condition"])
+            data_rank_hist.append(data_diag["rank"])
+            data_logdet_hist.append(data_diag["logdet"])
+            data_min_eig_hist.append(data_diag["min_eig"])
+            info_gain_hist.append(float(ig_action))
 
             q = rollout_step(q, u)
             y_obs = fk_1d(q, THETA_TRUE) + rng.normal(0, SIGMA_OBS, size=(1,))
@@ -263,6 +353,23 @@ def run_one(seed, condition):
             lambda_hist.append(0.0)
             u = optimize_task_action_2d(q, theta_est, Y_GOAL_2D, u)
             action_energy_hist.append(float(jnp.sum(u**2)))
+            fim_action = compute_fim(q, u, theta_est)
+            ig_action = compute_info_gain(P_theta, fim_action)
+            fim_diag = _matrix_diagnostics(fim_action)
+            precision_diag = _matrix_diagnostics(P_theta)
+            data_info = P_theta - PARAMS_PRIOR_PI * jnp.eye(2)
+            data_diag = _matrix_diagnostics(data_info)
+            fim_rank_hist.append(fim_diag["rank"])
+            fim_logdet_hist.append(fim_diag["logdet"])
+            fim_min_eig_hist.append(fim_diag["min_eig"])
+            precision_rank_hist.append(precision_diag["rank"])
+            precision_logdet_hist.append(precision_diag["logdet"])
+            precision_min_eig_hist.append(precision_diag["min_eig"])
+            precision_condition_hist.append(precision_diag["condition"])
+            data_rank_hist.append(data_diag["rank"])
+            data_logdet_hist.append(data_diag["logdet"])
+            data_min_eig_hist.append(data_diag["min_eig"])
+            info_gain_hist.append(float(ig_action))
             q = rollout_step(q, u)
 
     return {
@@ -271,6 +378,17 @@ def run_one(seed, condition):
         "q2": np.array(q2_hist),
         "lambda": np.array(lambda_hist),
         "action_energy": np.array(action_energy_hist),
+        "fim_rank": np.array(fim_rank_hist),
+        "fim_logdet": np.array(fim_logdet_hist),
+        "fim_min_eig": np.array(fim_min_eig_hist),
+        "precision_rank": np.array(precision_rank_hist),
+        "precision_logdet": np.array(precision_logdet_hist),
+        "precision_min_eig": np.array(precision_min_eig_hist),
+        "precision_condition": np.array(precision_condition_hist),
+        "data_rank": np.array(data_rank_hist),
+        "data_logdet": np.array(data_logdet_hist),
+        "data_min_eig": np.array(data_min_eig_hist),
+        "info_gain": np.array(info_gain_hist),
         "theta_final": np.array(theta_est),
         "frac_near_zero_q2": float(np.mean(np.abs(q2_hist[:CHANGE_STEP]) < 0.1)),
     }
@@ -300,16 +418,33 @@ def main():
     print("\n=== Summary ===")
     print(
         f"  {'Condition':15s}  {'RMSE@50':8s}  {'TaskErr@100':11s}  "
-        f"{'mean|q2|Ph1':11s}  {'EnergyPh1':9s}  {'frac_q2<0.1':11s}"
+        f"{'mean|q2|Ph1':11s}  {'EnergyPh1':9s}  {'failRMSE':8s}  {'failTask':8s}"
     )
     summary = {}
     for cond in CONDITIONS:
-        rmse_at_change = [r["rmse"][CHANGE_STEP - 1] for r in results[cond]]
-        task_err_final = [r["task_err"][-1] for r in results[cond]]
-        q2_means = [np.mean(np.abs(r["q2"][:CHANGE_STEP])) for r in results[cond]]
-        energy_ph1 = [np.mean(r["action_energy"][:CHANGE_STEP]) for r in results[cond]]
-        frac_zero = [r["frac_near_zero_q2"] for r in results[cond]]
+        rmse_at_change = np.array([r["rmse"][CHANGE_STEP - 1] for r in results[cond]])
+        task_err_final = np.array([r["task_err"][-1] for r in results[cond]])
+        q2_means = np.array([np.mean(np.abs(r["q2"][:CHANGE_STEP])) for r in results[cond]])
+        energy_ph1 = np.array([np.mean(r["action_energy"][:CHANGE_STEP]) for r in results[cond]])
+        frac_zero = np.array([r["frac_near_zero_q2"] for r in results[cond]])
+        data_rank_final = np.array([r["data_rank"][CHANGE_STEP - 1] for r in results[cond]])
+        info_gain_ph1 = np.array([np.mean(r["info_gain"][:CHANGE_STEP]) for r in results[cond]])
+        precision_cond_final = np.array([r["precision_condition"][CHANGE_STEP - 1] for r in results[cond]])
+        rmse_failure_rate = float(np.mean(rmse_at_change > PARAM_RMSE_FAILURE_THRESHOLD))
+        task_failure_rate = float(np.mean(task_err_final > TASK_ERR_FAILURE_THRESHOLD))
         summary[cond] = {
+            "n_seeds": N_SEEDS,
+            "rmse_at_change": _summarize(rmse_at_change),
+            "task_err_final": _summarize(task_err_final),
+            "mean_abs_q2_phase1": _summarize(q2_means),
+            "action_energy_phase1": _summarize(energy_ph1),
+            "frac_near_zero_q2": _summarize(frac_zero),
+            "data_rank_at_change": _summarize(data_rank_final),
+            "info_gain_phase1": _summarize(info_gain_ph1),
+            "precision_condition_at_change": _summarize(precision_cond_final),
+            "rmse_failure_rate": rmse_failure_rate,
+            "task_failure_rate": task_failure_rate,
+            # Backward-compatible flat medians for README/tutorial snippets.
             "rmse_at_change_median": float(np.median(rmse_at_change)),
             "task_err_final_median": float(np.median(task_err_final)),
             "mean_abs_q2_phase1_median": float(np.median(q2_means)),
@@ -320,7 +455,7 @@ def main():
               f"{np.median(task_err_final):.4f}       "
               f"{np.median(q2_means):.3f}        "
               f"{np.median(energy_ph1):.3f}      "
-              f"{np.median(frac_zero):.2f}")
+              f"{rmse_failure_rate:.2f}      {task_failure_rate:.2f}")
 
     out_json = project_root / "results" / "dual_control_1d_obs_summary.json"
     with open(out_json, "w") as f:
@@ -341,6 +476,8 @@ def main():
     COLORS = {
         "vfe_only": "C3",
         "random": "C4",
+        "scripted_q2": "C5",
+        "dual_no_precision_feedback": "C6",
         "dual_weak": "C1",
         "dual_strong": "C0",
         "dual_adaptive": "C2",
@@ -348,6 +485,8 @@ def main():
     LABELS = {
         "vfe_only": "VFE only (λ=0)",
         "random": "Random excitation",
+        "scripted_q2": "Scripted q2",
+        "dual_no_precision_feedback": "Dual no precision feedback",
         "dual_weak": "Dual weak (λ=0.5)",
         "dual_strong": "Dual strong (λ=3.0)",
         "dual_adaptive": "Dual adaptive",
@@ -405,8 +544,15 @@ def main():
 
     # --- (D) Task error boxplot at final step ---
     ax = axes[1, 1]
-    lam_labels = {"vfe_only": "0", "random": "rand", "dual_weak": "0.5",
-                  "dual_strong": "3.0", "dual_adaptive": "adpt"}
+    lam_labels = {
+        "vfe_only": "0",
+        "random": "rand",
+        "scripted_q2": "script",
+        "dual_no_precision_feedback": "3/noP",
+        "dual_weak": "0.5",
+        "dual_strong": "3.0",
+        "dual_adaptive": "adpt",
+    }
     task_final = [[r["task_err"][-1] for r in results[cond]] for cond in CONDITIONS]
     bp = ax.boxplot(task_final, tick_labels=CONDITIONS, patch_artist=True)
     for patch, cond in zip(bp["boxes"], CONDITIONS):
@@ -420,6 +566,58 @@ def main():
     out = project_root / "results" / "dual_control_1d_obs.png"
     plt.savefig(out, dpi=150, bbox_inches="tight")
     print(f"Saved figure → {out}")
+
+    # -----------------------------------------------------------------------
+    # Mechanism diagnostics: does excitation precede precision/rank/reaching?
+    # -----------------------------------------------------------------------
+    fig, axes = plt.subplots(3, 2, figsize=(13, 10), sharex=True)
+    fig.suptitle(
+        "Mechanism diagnostics: excitation → information rank/precision → calibration → task",
+        fontsize=11,
+    )
+
+    def plot_median_iqr(ax, cond, key, transform=lambda x: x):
+        mat = np.array([transform(r[key]) for r in results[cond]])
+        med = np.median(mat, axis=0)
+        q25 = np.percentile(mat, 25, axis=0)
+        q75 = np.percentile(mat, 75, axis=0)
+        ax.plot(steps, med, color=COLORS[cond], label=LABELS[cond])
+        ax.fill_between(steps, q25, q75, color=COLORS[cond], alpha=0.12)
+
+    diagnostic_specs = [
+        (axes[0, 0], "q2", lambda x: np.abs(x), "abs(q2) (rad)",
+         "(A) Elbow excitation"),
+        (axes[0, 1], "fim_rank", lambda x: x, "rank(FIM_future(action))",
+         "(B) Selected-action FIM rank"),
+        (axes[1, 0], "precision_min_eig", lambda x: x, "min eig(P_theta)",
+         "(C) Weakest posterior precision direction"),
+        (axes[1, 1], "info_gain", lambda x: x, "IG of selected action",
+         "(D) Action information gain"),
+        (axes[2, 0], "rmse", lambda x: x, "Parameter RMSE",
+         "(E) Calibration error"),
+        (axes[2, 1], "task_err", lambda x: x, "2D task error (m)",
+         "(F) Downstream task error"),
+    ]
+
+    for ax, key, transform, ylabel, title in diagnostic_specs:
+        for cond in CONDITIONS:
+            plot_median_iqr(ax, cond, key, transform)
+        shade_phase2(ax)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.grid(True, alpha=0.25)
+
+    axes[1, 0].set_yscale("log")
+    axes[1, 1].set_yscale("symlog", linthresh=1e-3)
+    axes[2, 0].set_yscale("log")
+    for ax in axes[2, :]:
+        ax.set_xlabel("Step")
+    axes[0, 0].legend(fontsize=6, ncols=2)
+
+    plt.tight_layout()
+    out_diag = project_root / "results" / "dual_control_1d_obs_diagnostics.png"
+    plt.savefig(out_diag, dpi=150, bbox_inches="tight")
+    print(f"Saved diagnostics figure → {out_diag}")
 
 
 if __name__ == "__main__":
