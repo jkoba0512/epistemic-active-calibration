@@ -87,9 +87,11 @@ experiments/
   lambda_sweep.py                 Fixed/adaptive epistemic weight sweep
   epistemic_calibration_2dof.py   Earlier 2-DoF calibration experiment
   dual_control_2dof.py            Earlier dual-control experiment
+  so101/                          Optional MuJoCo/SO-101 extension scripts
 
 results/
   lambda_sweep.json               Summary metrics for lambda sweep
+  sensitivity_2dof_arm.csv        Existing SO-101/MuJoCo sensitivity sweep data
   *.png                           Generated experiment figures
 
 plan/
@@ -127,6 +129,38 @@ environment:
 uv sync --group dev --reinstall
 uv run pytest -q
 ```
+
+## Optional SO-101 / MuJoCo Experiments
+
+The SO-101/MuJoCo scripts are preserved as future hardware-facing research
+assets. They are not part of the core proof-of-concept reproduction path.
+
+Install their optional dependencies with:
+
+```bash
+uv sync --group dev --group so101
+```
+
+Available commands:
+
+```bash
+uv run --group so101 python experiments/so101/dem_mujoco_2dof_arm.py
+uv run --group so101 python experiments/so101/param_id_2dof_arm.py
+uv run --group so101 python experiments/so101/sensitivity_2dof_arm.py
+```
+
+Outputs:
+
+```text
+results/dem_mujoco_2dof_arm.png
+results/param_id_2dof_arm.png
+results/sensitivity_2dof_arm.png
+results/sensitivity_2dof_arm.csv
+```
+
+Use these scripts when extending the project toward higher-fidelity MuJoCo
+simulation or real SO-101 calibration. Keep the central README reproduction
+commands above as the default benchmark until the hardware pipeline is tested.
 
 ## Reproducing the Main Results
 

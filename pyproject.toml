@@ -22,6 +22,10 @@ dev = [
     "hatchling>=1.29.0",
     "pytest>=9.0.2",
 ]
+so101 = [
+    "mujoco>=3.4.0",
+    "scipy>=1.17.1",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dem"]
