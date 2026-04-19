@@ -286,6 +286,37 @@ class EStep:
 
         return params - dp
 
+    def compute_precision(
+        self,
+        mu_x_sequence: List[jnp.ndarray],
+        mu_v_sequence: List[jnp.ndarray],
+        y_sequence: List[jnp.ndarray],
+        params: jnp.ndarray,
+    ) -> jnp.ndarray:
+        """Compute posterior precision P_theta from accumulated Gauss-Newton curvature.
+
+        P_theta = Σ_t [ Jᵀ_y Π̃_y J_y + Jᵀ_x Π̃_x J_x ] + Π_θ I
+
+        This is the inverse posterior covariance of θ (Fisher information + prior).
+        Use this to track parameter uncertainty for the epistemic A-step.
+
+        Args:
+            mu_x_sequence: List of T posterior state means, each shape (n_x*n_order,).
+            mu_v_sequence: List of T posterior cause means, each shape (n_v*n_order,).
+            y_sequence: List of T generalized observations, each shape (n_y*n_order,).
+            params: Current parameter vector θ, shape (n_params,).
+
+        Returns:
+            P_theta: Posterior precision matrix, shape (n_params, n_params).
+        """
+        n_params = params.shape[0]
+        total_dFdpp = jnp.zeros((n_params, n_params))
+        for mu_x, mu_v, y in zip(mu_x_sequence, mu_v_sequence, y_sequence):
+            _, dFdpp_t = self.accumulate_gauss_newton(mu_x, mu_v, y, params)
+            total_dFdpp = total_dFdpp + dFdpp_t
+        prior_curv = self.model.params_prior_pi * jnp.eye(n_params)
+        return total_dFdpp + prior_curv
+
     def run(
         self,
         mu_x_sequence: List[jnp.ndarray],

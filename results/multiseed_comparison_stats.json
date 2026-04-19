@@ -1,0 +1,52 @@
+{
+  "summary": {
+    "random": {
+      "final_rmse_mean": 0.003855010145247703,
+      "final_rmse_std": 0.0033939828041466315,
+      "auc_mean": 0.20781072849014656,
+      "auc_std": 0.07469477612940771,
+      "conv_step_median": 1.0,
+      "conv_step_q25": 1.0,
+      "conv_step_q75": 1.0,
+      "conv_rate": 1.0
+    },
+    "sinusoidal": {
+      "final_rmse_mean": 0.002722849807003668,
+      "final_rmse_std": 0.0015734272743847249,
+      "auc_mean": 0.1786575619143687,
+      "auc_std": 0.04759250836389936,
+      "conv_step_median": 1.0,
+      "conv_step_q25": 1.0,
+      "conv_step_q75": 1.0,
+      "conv_rate": 1.0
+    },
+    "epistemic": {
+      "final_rmse_mean": 0.002735913415592794,
+      "final_rmse_std": 0.0015413605010430645,
+      "auc_mean": 0.1680037488986943,
+      "auc_std": 0.044430680524232206,
+      "conv_step_median": 1.0,
+      "conv_step_q25": 1.0,
+      "conv_step_q75": 1.0,
+      "conv_rate": 1.0
+    }
+  },
+  "mann_whitney": {
+    "epistemic_vs_random_final_RMSE": {
+      "U": 167.0,
+      "p": 0.189665967563656
+    },
+    "epistemic_vs_random_AUC_RMSE": {
+      "U": 146.0,
+      "p": 0.07392329135718094
+    },
+    "epistemic_vs_sinusoidal_final_RMSE": {
+      "U": 197.0,
+      "p": 0.4730419883125112
+    },
+    "epistemic_vs_sinusoidal_AUC_RMSE": {
+      "U": 169.0,
+      "p": 0.20467792787108702
+    }
+  }
+}

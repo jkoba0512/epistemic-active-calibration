@@ -1,0 +1,381 @@
+"""Dual-control with 1D observation: demonstrates clear epistemic advantage.
+
+The key insight: when observation is 1D (x_ee only) and arm starts near extension,
+VFE-only control drives the arm to a fixed (wrong) target and stays there.
+The fixed target provides non-informative observations → E-step stalls.
+Dual-control with epistemic bonus actively moves q2 to improve FIM rank.
+
+Conditions:
+  vfe_only      λ = 0.0   pure task (drives to wrong target, calibration stalls)
+  dual_weak     λ = 0.5   mild epistemic
+  dual_strong   λ = 3.0   strong epistemic (exploration-heavy)
+  dual_adaptive λ = f(P)  high when uncertain, low when calibrated
+
+System:
+  q = [q1, q2]   joint angles
+  u = [dq1, dq2] velocity command
+  θ = [l1, l2]   unknown link lengths
+  y = [x_ee]     1D observation (x component only)
+  y_goal = x_ee(q_target, θ_true)   scalar target
+
+Usage:
+    .venv/bin/python experiments/dual_control_1d_obs.py
+
+Output:
+    results/dual_control_1d_obs.png
+"""
+
+import sys
+from pathlib import Path
+
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+import numpy as np
+import jax
+import jax.numpy as jnp
+
+jax.config.update("jax_enable_x64", True)
+
+from src.dem.model import DEMModel
+from src.dem.estep import EStep
+
+# ---------------------------------------------------------------------------
+# System parameters
+# ---------------------------------------------------------------------------
+THETA_TRUE = jnp.array([0.5, 0.5])    # true link lengths
+THETA_INIT = jnp.array([0.9, 0.1])    # initial estimate (badly wrong)
+# Q0=[π/3, 0]: with theta_init=[0.9,0.1], x_ee_est = 0.9*cos(π/3)+0.1*cos(π/3) = 0.5 = x_goal
+# → VFE-only thinks it's ALREADY AT the goal, never moves → E-step stalls (rank-1 FIM)
+# → Epistemic A-step MUST move q2 to break degeneracy
+Q0 = jnp.array([jnp.pi / 3, 0.0])
+Q_TARGET = jnp.array([jnp.pi / 3, 0.0])   # reachable with true theta at different q config
+
+DT = 0.05
+N_STEPS = 100
+CHANGE_STEP = 50    # Phase 2 starts here: 2D goal introduced
+N_SEEDS = 10
+U_MAX = 0.8
+LR_ACTION = 0.05
+N_ACTION_ITER = 30
+
+# E-step parameters
+SIGMA_OBS = 0.02
+PI_Y = 1.0 / SIGMA_OBS**2
+PI_X = 1.0
+PARAMS_PRIOR_PI = 1.0   # weak prior → aggressive calibration
+KAPPA_P = 0.5            # Gauss-Newton step size
+N_ESTEP_ITER = 3
+
+# Dual-control lambda settings
+LAMBDA_0 = 3.0
+LAMBDA_SCALE = 0.5
+LR_EPISTEMIC = 0.05
+N_EPISTEMIC_ITER = 30
+
+CONDITIONS = ["vfe_only", "dual_weak", "dual_strong", "dual_adaptive"]
+LAMBDA_FIXED = {"vfe_only": 0.0, "dual_weak": 0.5, "dual_strong": 3.0, "dual_adaptive": None}
+
+# ---------------------------------------------------------------------------
+# Kinematics (2-DOF planar)
+# ---------------------------------------------------------------------------
+def fk_2d(q, theta):
+    """Full 2D EE position."""
+    l1, l2 = theta[0], theta[1]
+    x = l1 * jnp.cos(q[0]) + l2 * jnp.cos(q[0] + q[1])
+    y = l1 * jnp.sin(q[0]) + l2 * jnp.sin(q[0] + q[1])
+    return jnp.array([x, y])
+
+def fk_1d(q, theta):
+    """1D observation: x_ee only."""
+    l1, l2 = theta[0], theta[1]
+    x = l1 * jnp.cos(q[0]) + l2 * jnp.cos(q[0] + q[1])
+    return jnp.array([x])
+
+# Phase 1: 1D calibration goal
+Y_GOAL = fk_1d(Q_TARGET, THETA_TRUE)   # shape (1,)
+
+# Phase 2: new 2D task goal (requires correct theta to reach)
+# Q_TARGET_2 = [π/6, π/3] is well away from the degenerate q2=0 manifold
+Q_TARGET_2 = jnp.array([jnp.pi / 6, jnp.pi / 3])
+Y_GOAL_2D = fk_2d(Q_TARGET_2, THETA_TRUE)   # shape (2,)
+
+# ---------------------------------------------------------------------------
+# Rollout for FIM computation
+# ---------------------------------------------------------------------------
+def rollout_step(q, u):
+    return jnp.clip(q + u * DT, -jnp.pi, jnp.pi)
+
+def rollout(q0, u, n_steps=5):
+    """Rollout n_steps with constant u."""
+    def step(q, _):
+        q_next = rollout_step(q, u)
+        return q_next, q_next
+    _, qs = jax.lax.scan(step, q0, None, length=n_steps)
+    return qs   # (n_steps, 2)
+
+def compute_fim(q, u, theta):
+    """FIM = J.T @ R_inv @ J, J = d(y_future)/d(theta)."""
+    def y_future_fn(th):
+        qs = rollout(q, u, n_steps=5)
+        return jnp.concatenate([fk_1d(qi, th) for qi in qs])
+    J = jax.jacfwd(y_future_fn)(theta)   # (5, 2)
+    R_inv = jnp.eye(5) * PI_Y
+    return J.T @ R_inv @ J
+
+def compute_info_gain(P_theta, fim):
+    """IG = 0.5 * (logdet(P + FIM) - logdet(P))."""
+    n = P_theta.shape[0]
+    sign1, ld1 = jnp.linalg.slogdet(P_theta + fim)
+    sign0, ld0 = jnp.linalg.slogdet(P_theta)
+    return 0.5 * (ld1 - ld0)
+
+# ---------------------------------------------------------------------------
+# Action optimisation
+# ---------------------------------------------------------------------------
+PI_Y_TASK = 1.0 / 0.05**2   # task-goal precision
+
+@jax.jit
+def optimize_action(q, theta_est, P_theta, y_goal, lambda_eff, u_init):
+    """Gradient descent on J = VFE - lambda_eff * IG."""
+    def objective(u):
+        q_pred = rollout_step(q, u)
+        y_pred = fk_1d(q_pred, theta_est)
+        vfe = 0.5 * PI_Y_TASK * jnp.sum((y_pred - y_goal) ** 2)
+        fim = compute_fim(q, u, theta_est)
+        ig = compute_info_gain(P_theta, fim)
+        return vfe - lambda_eff * ig
+
+    def descent_step(u, _):
+        g = jax.grad(objective)(u)
+        return jnp.clip(u - LR_ACTION * g, -U_MAX, U_MAX), None
+
+    u_opt, _ = jax.lax.scan(descent_step, u_init, None, length=N_ACTION_ITER)
+    return u_opt
+
+@jax.jit
+def optimize_task_action_2d(q, theta_est, y_goal_2d, u_init):
+    """Phase 2: pure 2D task control with calibrated theta_est."""
+    def objective(u):
+        q_pred = rollout_step(q, u)
+        y_pred = fk_2d(q_pred, theta_est)
+        return 0.5 * PI_Y_TASK * jnp.sum((y_pred - y_goal_2d) ** 2)
+
+    def descent_step(u, _):
+        g = jax.grad(objective)(u)
+        return jnp.clip(u - LR_ACTION * g, -U_MAX, U_MAX), None
+
+    u_opt, _ = jax.lax.scan(descent_step, u_init, None, length=N_ACTION_ITER)
+    return u_opt
+
+# ---------------------------------------------------------------------------
+# DEM E-step setup
+# ---------------------------------------------------------------------------
+def _build_model(theta_init):
+    return DEMModel(
+        f=lambda x, v, p: jnp.zeros(2),
+        g=lambda x, v, p: fk_1d(x, p),
+        n_x=2, n_v=1, n_y=1, n_order=1,
+        pi_y=PI_Y, pi_x=PI_X,
+        params=theta_init,
+        params_prior_pi=PARAMS_PRIOR_PI,
+    )
+
+def _build_estep(theta_init):
+    model = _build_model(theta_init)
+    return EStep(model, kappa_p=KAPPA_P, use_gauss_newton=True)
+
+# ---------------------------------------------------------------------------
+# Single run
+# ---------------------------------------------------------------------------
+def run_one(seed, condition):
+    rng = np.random.default_rng(seed)
+    theta_est = THETA_INIT.copy()
+    P_theta = PARAMS_PRIOR_PI * jnp.eye(2)
+
+    estep = _build_estep(theta_est)
+
+    q = Q0.copy()
+    u = jnp.zeros(2)
+
+    rmse_hist = []
+    task_err_hist = []   # Phase 2: true 2D task error
+    q2_hist = []
+    lambda_hist = []
+
+    q_hist = []
+    v_hist = []
+    y_hist = []
+
+    for t in range(N_STEPS):
+        # --- Record metrics ---
+        err = theta_est - THETA_TRUE
+        rmse_hist.append(float(jnp.sqrt(jnp.mean(err**2))))
+        q2_hist.append(float(q[1]))
+
+        # True 2D task error (uses ground-truth theta)
+        ee_true = fk_2d(q, THETA_TRUE)
+        task_err_hist.append(float(jnp.sqrt(jnp.sum((ee_true - Y_GOAL_2D) ** 2))))
+
+        # --- Phase 1 (t < CHANGE_STEP): 1D VFE + epistemic ---
+        if t < CHANGE_STEP:
+            lf = LAMBDA_FIXED[condition]
+            if lf is None:
+                lam_min = float(jnp.linalg.eigvalsh(P_theta)[0])
+                lambda_eff = LAMBDA_0 / (1.0 + lam_min / LAMBDA_SCALE)
+            else:
+                lambda_eff = lf
+            lambda_hist.append(float(lambda_eff))
+
+            u = optimize_action(q, theta_est, P_theta, Y_GOAL, lambda_eff, u)
+
+            q = rollout_step(q, u)
+            y_obs = fk_1d(q, THETA_TRUE) + rng.normal(0, SIGMA_OBS, size=(1,))
+            y_obs = jnp.array(y_obs)
+
+            q_hist.append(q)
+            v_hist.append(jnp.zeros(1))
+            y_hist.append(y_obs)
+
+            # E-step (every 5 steps after warmup)
+            if t > 5 and t % 5 == 0:
+                theta_est = estep.run(q_hist, v_hist, y_hist, theta_est, n_iter=N_ESTEP_ITER)
+                theta_est = jnp.clip(theta_est, 0.05, 2.0)
+                P_theta = estep.compute_precision(q_hist, v_hist, y_hist, theta_est)
+                estep = _build_estep(theta_est)
+
+        # --- Phase 2 (t >= CHANGE_STEP): 2D task with calibrated theta ---
+        else:
+            lambda_hist.append(0.0)
+            u = optimize_task_action_2d(q, theta_est, Y_GOAL_2D, u)
+            q = rollout_step(q, u)
+
+    return {
+        "rmse": np.array(rmse_hist),
+        "task_err": np.array(task_err_hist),
+        "q2": np.array(q2_hist),
+        "lambda": np.array(lambda_hist),
+        "theta_final": np.array(theta_est),
+        "frac_near_zero_q2": float(np.mean(np.abs(q2_hist[:CHANGE_STEP]) < 0.1)),
+    }
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+def main():
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    results = {c: [] for c in CONDITIONS}
+
+    for cond in CONDITIONS:
+        print(f"Running {cond} ...")
+        for seed in range(N_SEEDS):
+            r = run_one(seed, cond)
+            results[cond].append(r)
+            print(f"  seed={seed:2d}  RMSE_final={r['rmse'][-1]:.4f}"
+                  f"  mean|q2|={np.mean(np.abs(r['q2'])):.3f}"
+                  f"  theta_final={r['theta_final']}")
+
+    # -----------------------------------------------------------------------
+    # Summary statistics
+    # -----------------------------------------------------------------------
+    print("\n=== Summary ===")
+    print(f"  {'Condition':15s}  {'RMSE@50':8s}  {'TaskErr@100':11s}  {'mean|q2|Ph1':11s}  {'frac_q2<0.1':11s}")
+    for cond in CONDITIONS:
+        rmse_at_change = [r["rmse"][CHANGE_STEP - 1] for r in results[cond]]
+        task_err_final = [r["task_err"][-1] for r in results[cond]]
+        q2_means = [np.mean(np.abs(r["q2"][:CHANGE_STEP])) for r in results[cond]]
+        frac_zero = [r["frac_near_zero_q2"] for r in results[cond]]
+        print(f"  {cond:15s}  {np.median(rmse_at_change):.4f}    "
+              f"{np.median(task_err_final):.4f}       "
+              f"{np.median(q2_means):.3f}        "
+              f"{np.median(frac_zero):.2f}")
+
+    # -----------------------------------------------------------------------
+    # Plots
+    # -----------------------------------------------------------------------
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    fig.suptitle(
+        "Dual-control: 1D calibration (x_ee) → 2D task execution\n"
+        r"$\theta_{init}=[0.9,0.1]$, $\theta_{true}=[0.5,0.5]$  |  "
+        f"Phase 1: steps 0–{CHANGE_STEP-1}  |  Phase 2: steps {CHANGE_STEP}–{N_STEPS-1}",
+        fontsize=10,
+    )
+
+    COLORS = {"vfe_only": "C3", "dual_weak": "C1", "dual_strong": "C0", "dual_adaptive": "C2"}
+    LABELS = {"vfe_only": "VFE only (λ=0)", "dual_weak": "Dual weak (λ=0.5)",
+              "dual_strong": "Dual strong (λ=3.0)", "dual_adaptive": "Dual adaptive"}
+
+    steps = np.arange(N_STEPS)
+
+    def shade_phase2(ax):
+        ax.axvspan(CHANGE_STEP, N_STEPS, color="gray", alpha=0.10, label="Phase 2 (2D task)")
+        ax.axvline(CHANGE_STEP, color="gray", linestyle="--", linewidth=0.8)
+
+    # --- (A) RMSE curves ---
+    ax = axes[0, 0]
+    for cond in CONDITIONS:
+        rmse_mat = np.array([r["rmse"] for r in results[cond]])
+        med = np.median(rmse_mat, axis=0)
+        q25 = np.percentile(rmse_mat, 25, axis=0)
+        q75 = np.percentile(rmse_mat, 75, axis=0)
+        ax.plot(steps, med, color=COLORS[cond], label=LABELS[cond])
+        ax.fill_between(steps, q25, q75, color=COLORS[cond], alpha=0.2)
+    shade_phase2(ax)
+    ax.set_xlabel("Step")
+    ax.set_ylabel("RMSE (θ)")
+    ax.set_title("(A) Parameter RMSE  [lower = better calibration]")
+    ax.legend(fontsize=7)
+    ax.set_yscale("log")
+
+    # --- (B) True 2D task error ---
+    ax = axes[0, 1]
+    for cond in CONDITIONS:
+        te_mat = np.array([r["task_err"] for r in results[cond]])
+        med = np.median(te_mat, axis=0)
+        q25 = np.percentile(te_mat, 25, axis=0)
+        q75 = np.percentile(te_mat, 75, axis=0)
+        ax.plot(steps, med, color=COLORS[cond], label=LABELS[cond])
+        ax.fill_between(steps, q25, q75, color=COLORS[cond], alpha=0.2)
+    shade_phase2(ax)
+    ax.set_xlabel("Step")
+    ax.set_ylabel("EE distance (m)")
+    ax.set_title("(B) True 2D task error  [lower = better task achievement]")
+    ax.legend(fontsize=7)
+
+    # --- (C) Elbow angle q2 ---
+    ax = axes[1, 0]
+    for cond in CONDITIONS:
+        q2_mat = np.array([r["q2"] for r in results[cond]])
+        med = np.median(q2_mat, axis=0)
+        ax.plot(steps, med, color=COLORS[cond], label=LABELS[cond])
+    shade_phase2(ax)
+    ax.axhline(0, color="k", linestyle=":", linewidth=0.8)
+    ax.set_xlabel("Step")
+    ax.set_ylabel("q2 (rad)")
+    ax.set_title("(C) Elbow angle q2  [near-zero → rank-1 FIM → calibration fails]")
+    ax.legend(fontsize=7)
+
+    # --- (D) Task error boxplot at final step ---
+    ax = axes[1, 1]
+    lam_labels = {"vfe_only": "0", "dual_weak": "0.5",
+                  "dual_strong": "3.0", "dual_adaptive": "adpt"}
+    task_final = [[r["task_err"][-1] for r in results[cond]] for cond in CONDITIONS]
+    bp = ax.boxplot(task_final, tick_labels=CONDITIONS, patch_artist=True)
+    for patch, cond in zip(bp["boxes"], CONDITIONS):
+        patch.set_facecolor(COLORS[cond])
+        patch.set_alpha(0.7)
+    ax.set_ylabel("Final task error (m)")
+    ax.set_title("(D) Final 2D task error  [lower = arm reached true goal]")
+    ax.set_xticklabels([f"{c}\n(λ={lam_labels[c]})" for c in CONDITIONS], fontsize=8)
+
+    plt.tight_layout()
+    out = project_root / "results" / "dual_control_1d_obs.png"
+    plt.savefig(out, dpi=150, bbox_inches="tight")
+    print(f"\nSaved figure → {out}")
+
+
+if __name__ == "__main__":
+    main()
