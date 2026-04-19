@@ -15,6 +15,7 @@ __pycache__/
 
 # Claude Code personal files
 .claude/
+.codex
 aif_calib_robustness.md
 aif_occlusion_manipulator.md
 
