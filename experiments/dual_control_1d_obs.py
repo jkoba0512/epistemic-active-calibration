@@ -7,6 +7,7 @@ Dual-control with epistemic bonus actively moves q2 to improve FIM rank.
 
 Conditions:
   vfe_only      λ = 0.0   pure task (drives to wrong target, calibration stalls)
+  random        u ~ U(-U_MAX, U_MAX) during Phase 1 (task-free excitation)
   dual_weak     λ = 0.5   mild epistemic
   dual_strong   λ = 3.0   strong epistemic (exploration-heavy)
   dual_adaptive λ = f(P)  high when uncertain, low when calibrated
@@ -23,9 +24,11 @@ Usage:
 
 Output:
     results/dual_control_1d_obs.png
+    results/dual_control_1d_obs_summary.json
 """
 
 import sys
+import json
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
@@ -73,8 +76,14 @@ LAMBDA_SCALE = 0.5
 LR_EPISTEMIC = 0.05
 N_EPISTEMIC_ITER = 30
 
-CONDITIONS = ["vfe_only", "dual_weak", "dual_strong", "dual_adaptive"]
-LAMBDA_FIXED = {"vfe_only": 0.0, "dual_weak": 0.5, "dual_strong": 3.0, "dual_adaptive": None}
+CONDITIONS = ["vfe_only", "random", "dual_weak", "dual_strong", "dual_adaptive"]
+LAMBDA_FIXED = {
+    "vfe_only": 0.0,
+    "random": 0.0,
+    "dual_weak": 0.5,
+    "dual_strong": 3.0,
+    "dual_adaptive": None,
+}
 
 # ---------------------------------------------------------------------------
 # Kinematics (2-DOF planar)
@@ -202,6 +211,7 @@ def run_one(seed, condition):
     task_err_hist = []   # Phase 2: true 2D task error
     q2_hist = []
     lambda_hist = []
+    action_energy_hist = []
 
     q_hist = []
     v_hist = []
@@ -217,17 +227,21 @@ def run_one(seed, condition):
         ee_true = fk_2d(q, THETA_TRUE)
         task_err_hist.append(float(jnp.sqrt(jnp.sum((ee_true - Y_GOAL_2D) ** 2))))
 
-        # --- Phase 1 (t < CHANGE_STEP): 1D VFE + epistemic ---
+        # --- Phase 1 (t < CHANGE_STEP): 1D calibration / exploration ---
         if t < CHANGE_STEP:
-            lf = LAMBDA_FIXED[condition]
-            if lf is None:
-                lam_min = float(jnp.linalg.eigvalsh(P_theta)[0])
-                lambda_eff = LAMBDA_0 / (1.0 + lam_min / LAMBDA_SCALE)
+            if condition == "random":
+                lambda_eff = 0.0
+                u = jnp.array(rng.uniform(-U_MAX, U_MAX, size=(2,)))
             else:
-                lambda_eff = lf
+                lf = LAMBDA_FIXED[condition]
+                if lf is None:
+                    lam_min = float(jnp.linalg.eigvalsh(P_theta)[0])
+                    lambda_eff = LAMBDA_0 / (1.0 + lam_min / LAMBDA_SCALE)
+                else:
+                    lambda_eff = lf
+                u = optimize_action(q, theta_est, P_theta, Y_GOAL, lambda_eff, u)
             lambda_hist.append(float(lambda_eff))
-
-            u = optimize_action(q, theta_est, P_theta, Y_GOAL, lambda_eff, u)
+            action_energy_hist.append(float(jnp.sum(u**2)))
 
             q = rollout_step(q, u)
             y_obs = fk_1d(q, THETA_TRUE) + rng.normal(0, SIGMA_OBS, size=(1,))
@@ -248,6 +262,7 @@ def run_one(seed, condition):
         else:
             lambda_hist.append(0.0)
             u = optimize_task_action_2d(q, theta_est, Y_GOAL_2D, u)
+            action_energy_hist.append(float(jnp.sum(u**2)))
             q = rollout_step(q, u)
 
     return {
@@ -255,6 +270,7 @@ def run_one(seed, condition):
         "task_err": np.array(task_err_hist),
         "q2": np.array(q2_hist),
         "lambda": np.array(lambda_hist),
+        "action_energy": np.array(action_energy_hist),
         "theta_final": np.array(theta_est),
         "frac_near_zero_q2": float(np.mean(np.abs(q2_hist[:CHANGE_STEP]) < 0.1)),
     }
@@ -282,16 +298,34 @@ def main():
     # Summary statistics
     # -----------------------------------------------------------------------
     print("\n=== Summary ===")
-    print(f"  {'Condition':15s}  {'RMSE@50':8s}  {'TaskErr@100':11s}  {'mean|q2|Ph1':11s}  {'frac_q2<0.1':11s}")
+    print(
+        f"  {'Condition':15s}  {'RMSE@50':8s}  {'TaskErr@100':11s}  "
+        f"{'mean|q2|Ph1':11s}  {'EnergyPh1':9s}  {'frac_q2<0.1':11s}"
+    )
+    summary = {}
     for cond in CONDITIONS:
         rmse_at_change = [r["rmse"][CHANGE_STEP - 1] for r in results[cond]]
         task_err_final = [r["task_err"][-1] for r in results[cond]]
         q2_means = [np.mean(np.abs(r["q2"][:CHANGE_STEP])) for r in results[cond]]
+        energy_ph1 = [np.mean(r["action_energy"][:CHANGE_STEP]) for r in results[cond]]
         frac_zero = [r["frac_near_zero_q2"] for r in results[cond]]
+        summary[cond] = {
+            "rmse_at_change_median": float(np.median(rmse_at_change)),
+            "task_err_final_median": float(np.median(task_err_final)),
+            "mean_abs_q2_phase1_median": float(np.median(q2_means)),
+            "action_energy_phase1_median": float(np.median(energy_ph1)),
+            "frac_near_zero_q2_median": float(np.median(frac_zero)),
+        }
         print(f"  {cond:15s}  {np.median(rmse_at_change):.4f}    "
               f"{np.median(task_err_final):.4f}       "
               f"{np.median(q2_means):.3f}        "
+              f"{np.median(energy_ph1):.3f}      "
               f"{np.median(frac_zero):.2f}")
+
+    out_json = project_root / "results" / "dual_control_1d_obs_summary.json"
+    with open(out_json, "w") as f:
+        json.dump(summary, f, indent=2)
+    print(f"\nSaved summary → {out_json}")
 
     # -----------------------------------------------------------------------
     # Plots
@@ -304,9 +338,20 @@ def main():
         fontsize=10,
     )
 
-    COLORS = {"vfe_only": "C3", "dual_weak": "C1", "dual_strong": "C0", "dual_adaptive": "C2"}
-    LABELS = {"vfe_only": "VFE only (λ=0)", "dual_weak": "Dual weak (λ=0.5)",
-              "dual_strong": "Dual strong (λ=3.0)", "dual_adaptive": "Dual adaptive"}
+    COLORS = {
+        "vfe_only": "C3",
+        "random": "C4",
+        "dual_weak": "C1",
+        "dual_strong": "C0",
+        "dual_adaptive": "C2",
+    }
+    LABELS = {
+        "vfe_only": "VFE only (λ=0)",
+        "random": "Random excitation",
+        "dual_weak": "Dual weak (λ=0.5)",
+        "dual_strong": "Dual strong (λ=3.0)",
+        "dual_adaptive": "Dual adaptive",
+    }
 
     steps = np.arange(N_STEPS)
 
@@ -360,7 +405,7 @@ def main():
 
     # --- (D) Task error boxplot at final step ---
     ax = axes[1, 1]
-    lam_labels = {"vfe_only": "0", "dual_weak": "0.5",
+    lam_labels = {"vfe_only": "0", "random": "rand", "dual_weak": "0.5",
                   "dual_strong": "3.0", "dual_adaptive": "adpt"}
     task_final = [[r["task_err"][-1] for r in results[cond]] for cond in CONDITIONS]
     bp = ax.boxplot(task_final, tick_labels=CONDITIONS, patch_artist=True)
@@ -374,7 +419,7 @@ def main():
     plt.tight_layout()
     out = project_root / "results" / "dual_control_1d_obs.png"
     plt.savefig(out, dpi=150, bbox_inches="tight")
-    print(f"\nSaved figure → {out}")
+    print(f"Saved figure → {out}")
 
 
 if __name__ == "__main__":

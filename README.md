@@ -198,21 +198,25 @@ Output:
 
 ```text
 results/dual_control_1d_obs.png
+results/dual_control_1d_obs_summary.json
 ```
 
 Expected qualitative result:
 
 - `vfe_only`: high parameter RMSE at step 50 and high final 2D task error.
+- `random`: better than VFE-only because it excites the elbow by chance, but
+  worse than epistemic dual-control in calibration and downstream task error.
 - `dual_weak`, `dual_strong`, `dual_adaptive`: low parameter RMSE and much lower
   final 2D task error.
 
 Representative medians from the current result set:
 
 ```text
-vfe_only     RMSE@50 ~= 0.268   TaskErr@100 ~= 0.135 m
-dual_weak    RMSE@50 ~= 0.006   TaskErr@100 ~= 0.014 m
-dual_strong  RMSE@50 ~= 0.007   TaskErr@100 ~= 0.015 m
-adaptive     RMSE@50 ~= 0.008   TaskErr@100 ~= 0.012 m
+vfe_only     RMSE@50 ~= 0.268   TaskErr@100 ~= 0.135 m   EnergyPh1 ~= 0.000
+random       RMSE@50 ~= 0.041   TaskErr@100 ~= 0.041 m   EnergyPh1 ~= 0.415
+dual_weak    RMSE@50 ~= 0.006   TaskErr@100 ~= 0.014 m   EnergyPh1 ~= 0.668
+dual_strong  RMSE@50 ~= 0.007   TaskErr@100 ~= 0.015 m   EnergyPh1 ~= 0.661
+adaptive     RMSE@50 ~= 0.008   TaskErr@100 ~= 0.012 m   EnergyPh1 ~= 0.350
 ```
 
 ### 4. Lambda Sweep
