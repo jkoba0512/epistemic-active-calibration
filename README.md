@@ -250,6 +250,8 @@ Expected qualitative result:
   worse than epistemic dual-control in calibration and downstream task error.
 - `scripted_q2`: a strong heuristic baseline; deliberate q2 excitation improves
   over random but does not match the best information-gain controllers.
+- `fim_greedy`: a D-optimal, OED-style baseline; improves over random but spends
+  high energy and still underperforms the dual controllers.
 - `dual_no_precision_feedback`: fixed-prior IG control; shows that posterior
   precision feedback is not uniquely required in this minimal setting.
 - `dual_weak`, `dual_strong`, `dual_adaptive`: low parameter RMSE and much lower
@@ -262,6 +264,7 @@ Representative medians from the current result set (`N_SEEDS = 20`):
 vfe_only                    RMSE@50 ~= 0.313   TaskErr@100 ~= 0.139 m   EnergyPh1 ~= 0.000
 random                      RMSE@50 ~= 0.033   TaskErr@100 ~= 0.037 m   EnergyPh1 ~= 0.420
 scripted_q2                 RMSE@50 ~= 0.022   TaskErr@100 ~= 0.027 m   EnergyPh1 ~= 0.289
+fim_greedy                  RMSE@50 ~= 0.020   TaskErr@100 ~= 0.024 m   EnergyPh1 ~= 1.280
 dual_no_precision_feedback  RMSE@50 ~= 0.005   TaskErr@100 ~= 0.011 m   EnergyPh1 ~= 0.957
 dual_weak                   RMSE@50 ~= 0.006   TaskErr@100 ~= 0.013 m   EnergyPh1 ~= 0.667
 dual_strong                 RMSE@50 ~= 0.008   TaskErr@100 ~= 0.013 m   EnergyPh1 ~= 0.661
@@ -274,6 +277,7 @@ Failure rates using `RMSE@50 > 0.10` and `TaskErr@100 > 0.05`:
 vfe_only:    RMSE failure 0.90, task failure 0.95
 random:      RMSE failure 0.10, task failure 0.35
 scripted_q2: RMSE failure 0.00, task failure 0.15
+fim_greedy:  RMSE failure 0.00, task failure 0.20
 dual_*:      RMSE failure 0.00, task failure 0.00
 ```
 
@@ -334,8 +338,8 @@ The three-reviewer internal discussion converged on this near-term plan:
 3. Interpret the ablations conservatively: IG/FIM-aware excitation is the
    supported mechanism; posterior-precision feedback is not uniquely necessary
    in this minimal setting.
-4. Add a cost-matched IG/FIM-greedy or OED-style baseline before making stronger
-   comparative claims.
+4. Treat the current `fim_greedy` result as an initial OED-style baseline; a
+   cost-matched FIM-greedy baseline remains future work.
 5. Use `results/dual_control_1d_obs_diagnostics.png` to report q2, information
    rank, precision, IG, RMSE, and task error together.
 6. Draft a short workshop-style paper section before expanding to hardware.
@@ -349,7 +353,9 @@ The three-reviewer internal discussion converged on this near-term plan:
 - Scripted q2 excitation is a strong heuristic baseline; the distinctive value
   of the proposed controller should be framed as autonomous information-aware
   excitation, not merely any elbow motion.
-- More classical OED and FIM-greedy baselines are still future work.
+- The current FIM-greedy baseline is not cost-matched and spends the most
+  Phase-1 energy; more classical and cost-matched OED baselines are still future
+  work.
 - `P_theta` is a local Laplace / Gauss-Newton precision approximation, not a
   guaranteed globally accurate posterior covariance.
 - Real robot safety constraints, latency, friction, calibration targets, and

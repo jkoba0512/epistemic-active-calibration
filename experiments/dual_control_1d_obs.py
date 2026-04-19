@@ -9,6 +9,7 @@ Conditions:
   vfe_only      λ = 0.0   pure task (drives to wrong target, calibration stalls)
   random        u ~ U(-U_MAX, U_MAX) during Phase 1 (task-free excitation)
   scripted_q2   hand-coded q2 excitation during Phase 1 (strong heuristic baseline)
+  fim_greedy    D-optimal greedy action maximizing logdet(FIM_future)
   dual_no_precision_feedback
                 λ = 3.0   epistemic objective uses fixed prior precision only
   dual_weak     λ = 0.5   mild epistemic
@@ -84,6 +85,7 @@ CONDITIONS = [
     "vfe_only",
     "random",
     "scripted_q2",
+    "fim_greedy",
     "dual_no_precision_feedback",
     "dual_weak",
     "dual_strong",
@@ -93,6 +95,7 @@ LAMBDA_FIXED = {
     "vfe_only": 0.0,
     "random": 0.0,
     "scripted_q2": 0.0,
+    "fim_greedy": 0.0,
     "dual_no_precision_feedback": 3.0,
     "dual_weak": 0.5,
     "dual_strong": 3.0,
@@ -100,6 +103,7 @@ LAMBDA_FIXED = {
 }
 SCRIPTED_Q2_AMP = 0.75
 SCRIPTED_Q2_PERIOD = 18
+FIM_GREEDY_ENERGY = 0.05
 PARAM_RMSE_FAILURE_THRESHOLD = 0.10
 TASK_ERR_FAILURE_THRESHOLD = 0.05
 
@@ -191,6 +195,27 @@ def scripted_q2_action(t):
     """Deterministic q2 excitation baseline with no epistemic feedback."""
     phase = 2.0 * np.pi * (t + 1) / SCRIPTED_Q2_PERIOD
     return jnp.array([0.0, SCRIPTED_Q2_AMP * np.sin(phase)])
+
+def optimize_fim_greedy_action(q, theta_est):
+    """D-optimal greedy baseline: choose action maximizing logdet(FIM_future).
+
+    This is intentionally not an Active Inference controller. It is a simple
+    OED-style comparison that asks whether a direct FIM-greedy heuristic is
+    sufficient to break the 1D observation degeneracy.
+    """
+    grid = np.linspace(-U_MAX, U_MAX, 5)
+    best_score = -np.inf
+    best_u = np.zeros(2)
+    for u1 in grid:
+        for u2 in grid:
+            u_cand = jnp.array([u1, u2])
+            fim = compute_fim(q, u_cand, theta_est)
+            sign, logdet = jnp.linalg.slogdet(fim + 1e-6 * jnp.eye(2))
+            score = float(logdet - FIM_GREEDY_ENERGY * jnp.sum(u_cand**2))
+            if sign > 0 and score > best_score:
+                best_score = score
+                best_u = np.array([u1, u2])
+    return jnp.array(best_u)
 
 # ---------------------------------------------------------------------------
 # Action optimisation
@@ -299,6 +324,9 @@ def run_one(seed, condition):
             elif condition == "scripted_q2":
                 lambda_eff = 0.0
                 u = scripted_q2_action(t)
+            elif condition == "fim_greedy":
+                lambda_eff = 0.0
+                u = optimize_fim_greedy_action(q, theta_est)
             else:
                 lf = LAMBDA_FIXED[condition]
                 if lf is None:
@@ -477,6 +505,7 @@ def main():
         "vfe_only": "C3",
         "random": "C4",
         "scripted_q2": "C5",
+        "fim_greedy": "C7",
         "dual_no_precision_feedback": "C6",
         "dual_weak": "C1",
         "dual_strong": "C0",
@@ -486,6 +515,7 @@ def main():
         "vfe_only": "VFE only (λ=0)",
         "random": "Random excitation",
         "scripted_q2": "Scripted q2",
+        "fim_greedy": "FIM greedy",
         "dual_no_precision_feedback": "Dual no precision feedback",
         "dual_weak": "Dual weak (λ=0.5)",
         "dual_strong": "Dual strong (λ=3.0)",
@@ -548,6 +578,7 @@ def main():
         "vfe_only": "0",
         "random": "rand",
         "scripted_q2": "script",
+        "fim_greedy": "fim",
         "dual_no_precision_feedback": "3/noP",
         "dual_weak": "0.5",
         "dual_strong": "3.0",
