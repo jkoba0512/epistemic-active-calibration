@@ -52,7 +52,7 @@ from src.dem.estep import EStep
 
 # ── Parameters ────────────────────────────────────────────────────────────────
 
-N_SEEDS  = 20
+N_SEEDS  = 50
 N_STEPS  = 60
 
 THETA_TRUE     = jnp.array([0.5, 0.5])
