@@ -98,7 +98,16 @@ ESTEP_FREQ = 3          # run E-step every 3 steps (was 5)
 PARAM_RMSE_FAIL = 0.08
 TASK_ERR_FAIL = 0.10    # 4× the null-space median; 1.6× the vfe_only median
 
-CONDITIONS = ["vfe_only", "dual_lambda", "null_space"]
+CONDITIONS = ["vfe_only", "dual_lambda", "null_space", "null_space_recovery", "null_space_posture"]
+
+# Recovery phase parameters (null_space_recovery only)
+# Steps [RECOVERY_START, CHANGE_STEP): stop epistemic, blend EE target toward task goal
+RECOVERY_START = CHANGE_STEP - 20  # = 130
+
+# Posture condition parameters (null_space_posture only)
+# Phase 2: 200 steps (vs 50) + null-space posture regularization
+N_STEPS_POSTURE = CHANGE_STEP + 200  # = 350
+POSTURE_GAIN = 1.0                   # gain for null-space posture term: N @ (-k * q)
 
 # ---------------------------------------------------------------------------
 # Kinematics
@@ -186,6 +195,25 @@ def compute_null_space_action(q, theta_est, P_theta, y_goal):
     u_epis = ALPHA_NS * N_mat @ ig_grad                      # (4,) in null(J_ee)
 
     return jnp.clip(u_task + u_epis, -U_MAX, U_MAX)
+
+
+@jax.jit
+def compute_posture_task_action(q, theta_est, y_goal):
+    """Phase 2 action with null-space posture regularization.
+
+    u = J_ee⁺ v_task + N · (−k · q)
+
+    The posture term pulls joints via the null space, helping the arm escape
+    near-singular configurations (q≈0) where pure task control converges slowly.
+    """
+    J_ee = jax.jacfwd(lambda qi: fk(qi, theta_est))(q)
+    J_pinv = jnp.linalg.pinv(J_ee)
+    y_ee = fk(q, theta_est)
+    v_task = -K_TASK * (y_ee - y_goal)
+    u_task = J_pinv @ v_task
+    N_mat = jnp.eye(N_DOF) - J_pinv @ J_ee
+    u_posture = N_mat @ (-POSTURE_GAIN * q)
+    return jnp.clip(u_task + u_posture, -U_MAX, U_MAX)
 
 
 @jax.jit
@@ -294,7 +322,8 @@ def run_one(seed, condition):
 
     q_hist, v_hist, y_hist = [], [], []
 
-    for t in range(N_STEPS):
+    n_total = N_STEPS_POSTURE if condition == "null_space_posture" else N_STEPS
+    for t in range(n_total):
         # ---- Record metrics ----
         rmse_hist.append(float(jnp.sqrt(jnp.mean((theta_est - THETA_TRUE) ** 2))))
         ee_true = fk(q, THETA_TRUE)
@@ -315,14 +344,25 @@ def run_one(seed, condition):
                 u = compute_vfe_only_action(q, theta_est, Y_GOAL_HOLD)
             elif condition == "dual_lambda":
                 u = optimize_dual_action(q, theta_est, P_theta, Y_GOAL_HOLD, u)
-            else:  # null_space
+            elif condition == "null_space":
+                u = compute_null_space_action(q, theta_est, P_theta, Y_GOAL_HOLD)
+            elif condition == "null_space_recovery":
+                if t < RECOVERY_START:
+                    u = compute_null_space_action(q, theta_est, P_theta, Y_GOAL_HOLD)
+                else:
+                    blend = (t - RECOVERY_START) / (CHANGE_STEP - RECOVERY_START)
+                    y_blend = (1.0 - blend) * Y_GOAL_HOLD + blend * Y_GOAL_TASK
+                    u = compute_vfe_only_action(q, theta_est, y_blend)
+            else:  # null_space_posture: same Phase 1 as null_space
                 u = compute_null_space_action(q, theta_est, P_theta, Y_GOAL_HOLD)
         else:
             # Phase 2: task execution with FROZEN θ (no further calibration)
-            # This cleanly measures whether Phase-1 calibration was sufficient.
             if theta_frozen is None:
                 theta_frozen = theta_est
-            u = compute_vfe_only_action(q, theta_frozen, Y_GOAL_TASK)
+            if condition == "null_space_posture":
+                u = compute_posture_task_action(q, theta_frozen, Y_GOAL_TASK)
+            else:
+                u = compute_vfe_only_action(q, theta_frozen, Y_GOAL_TASK)
 
         # ---- Apply action and observe ----
         q = rollout_step(q, u)
@@ -342,6 +382,8 @@ def run_one(seed, condition):
             estep = _build_estep(theta_est)
 
     theta_end_ph1 = theta_frozen if theta_frozen is not None else theta_est
+    # Final P_theta diagnostics (for failure analysis)
+    p_final = _matrix_diag(P_theta)
     return {
         "rmse": np.array(rmse_hist),
         "task_err": np.array(task_err_hist),
@@ -349,6 +391,13 @@ def run_one(seed, condition):
         "p_theta_logdet": np.array(p_theta_logdet_hist),
         "ee_hold_err": np.array(ee_hold_err_hist),
         "theta_final_ph1": np.array(theta_end_ph1),
+        # Per-seed Phase-1-end diagnostics for failure analysis
+        "rmse_at_change": float(np.array(rmse_hist)[CHANGE_STEP - 1]),
+        "task_err_final": float(np.array(task_err_hist)[-1]),
+        "ee_hold_mean": float(np.mean(np.abs(np.array(ee_hold_err_hist)[:CHANGE_STEP]))),
+        "p_theta_rank_at_change": int(np.array(p_theta_rank_hist)[CHANGE_STEP - 1]),
+        "p_theta_min_eig": p_final["min_eig"],
+        "p_theta_cond": p_final["cond"],
     }
 
 
@@ -378,11 +427,14 @@ def main():
     # -----------------------------------------------------------------------
     # Summary statistics
     # -----------------------------------------------------------------------
-    COLORS = {"vfe_only": "C3", "dual_lambda": "C0", "null_space": "C2"}
+    COLORS = {"vfe_only": "C3", "dual_lambda": "C0", "null_space": "C2",
+              "null_space_recovery": "C4", "null_space_posture": "C1"}
     LABELS = {
-        "vfe_only":    "VFE only (task, no epistemic)",
-        "dual_lambda": f"Dual control (λ={LAMBDA_DUAL})",
-        "null_space":  "Null-space epistemic (proposed)",
+        "vfe_only":             "VFE only (task, no epistemic)",
+        "dual_lambda":          f"Dual control (λ={LAMBDA_DUAL})",
+        "null_space":           "Null-space epistemic (proposed)",
+        "null_space_recovery":  "Null-space + recovery (proposed+)",
+        "null_space_posture":   f"Null-space + posture Ph2 ×4 steps (proposed++)",
     }
 
     summary = {}
@@ -421,8 +473,63 @@ def main():
     print(f"\nSaved summary → {out_json}")
 
     # -----------------------------------------------------------------------
+    # Failure analysis for null_space condition
+    # -----------------------------------------------------------------------
+    if "null_space" in results:
+        ns_results = results["null_space"]
+        failure_analysis = {"n_seeds": N_SEEDS, "conditions": {}}
+
+        for cond in CONDITIONS:
+            per_seed = []
+            for seed_idx, r in enumerate(results[cond]):
+                rmse_ch = r["rmse_at_change"]
+                task_f  = r["task_err_final"]
+                ee_hold = r["ee_hold_mean"]
+                prank   = r["p_theta_rank_at_change"]
+
+                # Failure classification
+                if rmse_ch > PARAM_RMSE_FAIL:
+                    failure_mode = "estimation_failure"   # theta never converged
+                elif task_f > TASK_ERR_FAIL:
+                    if prank < N_DOF:
+                        failure_mode = "incomplete_identifiability"  # FIM rank < 4
+                    elif ee_hold > 0.05:
+                        failure_mode = "ee_drift"        # null-space projection broke
+                    else:
+                        failure_mode = "task_control"    # theta ok, task control failed
+                else:
+                    failure_mode = "success"
+
+                per_seed.append({
+                    "seed": seed_idx,
+                    "rmse_at_change": float(rmse_ch),
+                    "task_err_final": float(task_f),
+                    "ee_hold_mean": float(ee_hold),
+                    "p_theta_rank_at_change": int(prank),
+                    "p_theta_min_eig": float(r["p_theta_min_eig"]),
+                    "p_theta_cond": float(r["p_theta_cond"]),
+                    "theta_final_ph1": [float(x) for x in r["theta_final_ph1"]],
+                    "failure_mode": failure_mode,
+                })
+
+            modes = [s["failure_mode"] for s in per_seed]
+            mode_counts = {m: modes.count(m) for m in set(modes)}
+            failure_analysis["conditions"][cond] = {
+                "mode_counts": mode_counts,
+                "per_seed": per_seed,
+            }
+            print(f"\n  [{cond}] failure modes: {mode_counts}")
+
+        out_fa = project_root / "results" / "redundant_arm_failure_analysis.json"
+        with open(out_fa, "w") as f:
+            json.dump(failure_analysis, f, indent=2)
+        print(f"Saved failure analysis → {out_fa}")
+
+    # -----------------------------------------------------------------------
     # Plots
     # -----------------------------------------------------------------------
+    # For plotting, truncate/pad all trajectories to N_STEPS for visual comparison
+    # (null_space_posture runs to N_STEPS_POSTURE but we show first N_STEPS here)
     steps = np.arange(N_STEPS)
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 8))
@@ -439,7 +546,8 @@ def main():
         ax.axvline(CHANGE_STEP, color="gray", linestyle="--", linewidth=0.8)
 
     def plot_med_iqr(ax, cond, key, transform=lambda x: x):
-        mat = np.array([transform(r[key]) for r in results[cond]])
+        # Truncate to N_STEPS for uniform comparison across conditions
+        mat = np.array([transform(r[key])[:N_STEPS] for r in results[cond]])
         med = np.median(mat, axis=0)
         q25 = np.percentile(mat, 25, axis=0)
         q75 = np.percentile(mat, 75, axis=0)
@@ -484,7 +592,7 @@ def main():
     # (D) EE hold error (Phase 1) — key metric: task interference
     ax = axes[1, 1]
     for cond in CONDITIONS:
-        mat = np.array([r["ee_hold_err"][:CHANGE_STEP] for r in results[cond]])
+        mat = np.array([r["ee_hold_err"][:CHANGE_STEP] for r in results[cond]])  # Phase 1 only
         med = np.median(mat, axis=0)
         q25 = np.percentile(mat, 25, axis=0)
         q75 = np.percentile(mat, 75, axis=0)

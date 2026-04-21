@@ -258,27 +258,29 @@ Expected qualitative result:
   final 2D task error. `dual_adaptive` uses substantially less Phase-1 energy
   than strong fixed-lambda control.
 
-Representative medians from the current result set (`N_SEEDS = 20`):
+Representative medians from the current result set (`N_SEEDS = 50`):
 
 ```text
-vfe_only                    RMSE@50 ~= 0.313   TaskErr@100 ~= 0.139 m   EnergyPh1 ~= 0.000
-random                      RMSE@50 ~= 0.033   TaskErr@100 ~= 0.037 m   EnergyPh1 ~= 0.420
-scripted_q2                 RMSE@50 ~= 0.022   TaskErr@100 ~= 0.027 m   EnergyPh1 ~= 0.289
-fim_greedy                  RMSE@50 ~= 0.020   TaskErr@100 ~= 0.024 m   EnergyPh1 ~= 1.280
-dual_no_precision_feedback  RMSE@50 ~= 0.005   TaskErr@100 ~= 0.011 m   EnergyPh1 ~= 0.957
-dual_weak                   RMSE@50 ~= 0.006   TaskErr@100 ~= 0.013 m   EnergyPh1 ~= 0.667
-dual_strong                 RMSE@50 ~= 0.008   TaskErr@100 ~= 0.013 m   EnergyPh1 ~= 0.661
-dual_adaptive               RMSE@50 ~= 0.008   TaskErr@100 ~= 0.015 m   EnergyPh1 ~= 0.354
+vfe_only                    RMSE@50 ~= 0.326   TaskErr@100 ~= 0.139 m   EnergyPh1 ~= 0.000
+random                      RMSE@50 ~= 0.035   TaskErr@100 ~= 0.040 m   EnergyPh1 ~= 0.417
+scripted_q2                 RMSE@50 ~= 0.024   TaskErr@100 ~= 0.025 m   EnergyPh1 ~= 0.289
+fim_greedy                  RMSE@50 ~= 0.019   TaskErr@100 ~= 0.024 m   EnergyPh1 ~= 1.280
+fim_greedy_cost_matched     RMSE@50 ~= 0.014   TaskErr@100 ~= 0.021 m   EnergyPh1 ~= 0.667
+dual_no_precision_feedback  RMSE@50 ~= 0.004   TaskErr@100 ~= 0.012 m   EnergyPh1 ~= 0.957
+dual_weak                   RMSE@50 ~= 0.006   TaskErr@100 ~= 0.014 m   EnergyPh1 ~= 0.667
+dual_strong                 RMSE@50 ~= 0.007   TaskErr@100 ~= 0.015 m   EnergyPh1 ~= 0.658
+dual_adaptive               RMSE@50 ~= 0.009   TaskErr@100 ~= 0.013 m   EnergyPh1 ~= 0.378
 ```
 
 Failure rates using `RMSE@50 > 0.10` and `TaskErr@100 > 0.05`:
 
 ```text
-vfe_only:    RMSE failure 0.90, task failure 0.95
-random:      RMSE failure 0.10, task failure 0.35
-scripted_q2: RMSE failure 0.00, task failure 0.15
-fim_greedy:  RMSE failure 0.00, task failure 0.20
-dual_*:      RMSE failure 0.00, task failure 0.00
+vfe_only:                RMSE failure 0.86, task failure 0.98
+random:                  RMSE failure 0.10, task failure 0.32
+scripted_q2:             RMSE failure 0.00, task failure 0.14
+fim_greedy:              RMSE failure 0.00, task failure 0.16
+fim_greedy_cost_matched: RMSE failure 0.00, task failure 0.06
+dual_*:                  RMSE failure 0.00, task failure 0.00
 ```
 
 ### 4. Lambda Sweep
@@ -300,13 +302,13 @@ Current summary in `results/lambda_sweep.json`:
 
 | Condition | RMSE@50 median | Final 2D task error median | Phase-1 RMSE AUC median |
 |---|---:|---:|---:|
-| lambda = 0.0 | 0.313 | 0.139 | 0.355 |
-| lambda = 0.1 | 0.007 | 0.009 | 0.109 |
-| lambda = 0.5 | 0.006 | 0.013 | 0.104 |
-| lambda = 1.0 | 0.006 | 0.013 | 0.103 |
-| lambda = 3.0 | 0.008 | 0.013 | 0.102 |
-| lambda = 10.0 | 0.008 | 0.016 | 0.100 |
-| adaptive | 0.008 | 0.015 | 0.105 |
+| lambda = 0.0 | 0.326 | 0.139 | 0.349 |
+| lambda = 0.1 | 0.007 | 0.012 | 0.108 |
+| lambda = 0.5 | 0.006 | 0.014 | 0.104 |
+| lambda = 1.0 | 0.006 | 0.014 | 0.102 |
+| lambda = 3.0 | 0.007 | 0.015 | 0.102 |
+| lambda = 10.0 | 0.008 | 0.015 | 0.100 |
+| adaptive | 0.009 | 0.013 | 0.105 |
 
 Interpretation:
 
@@ -330,16 +332,17 @@ uv run python experiments/lambda_sweep.py
 
 ## Current Development Priorities
 
-The three-reviewer internal discussion converged on this near-term plan:
+The current result set supports this near-term plan:
 
 1. Keep the claim as a 2-DoF proof of concept.
 2. Treat the latest main experiment as the current reference result
-   (`N_SEEDS = 20`, random/scripted/fixed-prior/adaptive baselines).
+   (`N_SEEDS = 50`, including random, scripted, FIM-greedy, cost-matched
+   FIM-greedy, fixed-prior, and adaptive baselines).
 3. Interpret the ablations conservatively: IG/FIM-aware excitation is the
    supported mechanism; posterior-precision feedback is not uniquely necessary
    in this minimal setting.
-4. Treat the current `fim_greedy` result as an initial OED-style baseline; a
-   cost-matched FIM-greedy baseline remains future work.
+4. Use `fim_greedy_cost_matched` for same-energy comparisons, and describe
+   the unconstrained `fim_greedy` result as a higher-energy OED-style baseline.
 5. Use `results/dual_control_1d_obs_diagnostics.png` to report q2, information
    rank, precision, IG, RMSE, and task error together.
 6. Draft a short workshop-style paper section before expanding to hardware.

@@ -86,6 +86,7 @@ CONDITIONS = [
     "random",
     "scripted_q2",
     "fim_greedy",
+    "fim_greedy_cost_matched",   # same energy budget as dual_weak (~0.667)
     "dual_no_precision_feedback",
     "dual_weak",
     "dual_strong",
@@ -96,6 +97,7 @@ LAMBDA_FIXED = {
     "random": 0.0,
     "scripted_q2": 0.0,
     "fim_greedy": 0.0,
+    "fim_greedy_cost_matched": 0.0,
     "dual_no_precision_feedback": 3.0,
     "dual_weak": 0.5,
     "dual_strong": 3.0,
@@ -104,6 +106,8 @@ LAMBDA_FIXED = {
 SCRIPTED_Q2_AMP = 0.75
 SCRIPTED_Q2_PERIOD = 18
 FIM_GREEDY_ENERGY = 0.05
+# Cost-matched FIM-greedy: action energy constrained to match dual_weak (≈0.667)
+FIM_GREEDY_CM_TARGET = 0.667   # ||u||^2 budget per step
 PARAM_RMSE_FAILURE_THRESHOLD = 0.10
 TASK_ERR_FAILURE_THRESHOLD = 0.05
 
@@ -145,6 +149,7 @@ def rollout(q0, u, n_steps=5):
     _, qs = jax.lax.scan(step, q0, None, length=n_steps)
     return qs   # (n_steps, 2)
 
+@jax.jit
 def compute_fim(q, u, theta):
     """FIM = J.T @ R_inv @ J, J = d(y_future)/d(theta)."""
     def y_future_fn(th):
@@ -215,6 +220,34 @@ def optimize_fim_greedy_action(q, theta_est):
             if sign > 0 and score > best_score:
                 best_score = score
                 best_u = np.array([u1, u2])
+    return jnp.array(best_u)
+
+
+def optimize_fim_greedy_cost_matched(q, theta_est):
+    """Cost-matched FIM-greedy: search over directions at fixed energy budget.
+
+    Identical objective to fim_greedy (maximize logdet FIM_future), but the
+    action magnitude is fixed to sqrt(FIM_GREEDY_CM_TARGET) so that the
+    Phase-1 action energy matches dual_weak (≈0.667).
+
+    The search scans 60 uniformly-spaced action directions on a circle of
+    radius sqrt(FIM_GREEDY_CM_TARGET), then selects the direction with
+    the highest logdet(FIM_future).  This is a fair cost-matched comparison:
+    same energy budget, best direction for information gain.
+    """
+    target_norm = np.sqrt(FIM_GREEDY_CM_TARGET)
+    angles = np.linspace(0.0, 2.0 * np.pi, 60, endpoint=False)
+    best_score = -np.inf
+    best_u = np.zeros(2)
+    for angle in angles:
+        u_cand = jnp.array([np.cos(angle), np.sin(angle)]) * target_norm
+        u_cand = jnp.clip(u_cand, -U_MAX, U_MAX)
+        fim = compute_fim(q, u_cand, theta_est)
+        sign, logdet = jnp.linalg.slogdet(fim + 1e-6 * jnp.eye(2))
+        score = float(logdet) if sign > 0 else -np.inf
+        if score > best_score:
+            best_score = score
+            best_u = np.array(u_cand)
     return jnp.array(best_u)
 
 # ---------------------------------------------------------------------------
@@ -327,6 +360,9 @@ def run_one(seed, condition):
             elif condition == "fim_greedy":
                 lambda_eff = 0.0
                 u = optimize_fim_greedy_action(q, theta_est)
+            elif condition == "fim_greedy_cost_matched":
+                lambda_eff = 0.0
+                u = optimize_fim_greedy_cost_matched(q, theta_est)
             else:
                 lf = LAMBDA_FIXED[condition]
                 if lf is None:
@@ -432,13 +468,13 @@ def main():
     results = {c: [] for c in CONDITIONS}
 
     for cond in CONDITIONS:
-        print(f"Running {cond} ...")
+        print(f"Running {cond} ...", flush=True)
         for seed in range(N_SEEDS):
             r = run_one(seed, cond)
             results[cond].append(r)
             print(f"  seed={seed:2d}  RMSE_final={r['rmse'][-1]:.4f}"
                   f"  mean|q2|={np.mean(np.abs(r['q2'])):.3f}"
-                  f"  theta_final={r['theta_final']}")
+                  f"  theta_final={r['theta_final']}", flush=True)
 
     # -----------------------------------------------------------------------
     # Summary statistics
@@ -506,6 +542,7 @@ def main():
         "random": "C4",
         "scripted_q2": "C5",
         "fim_greedy": "C7",
+        "fim_greedy_cost_matched": "C8",
         "dual_no_precision_feedback": "C6",
         "dual_weak": "C1",
         "dual_strong": "C0",
@@ -515,7 +552,8 @@ def main():
         "vfe_only": "VFE only (λ=0)",
         "random": "Random excitation",
         "scripted_q2": "Scripted q2",
-        "fim_greedy": "FIM greedy",
+        "fim_greedy": "FIM greedy (unconstrained)",
+        "fim_greedy_cost_matched": f"FIM greedy (cost-matched, E≈{FIM_GREEDY_CM_TARGET})",
         "dual_no_precision_feedback": "Dual no precision feedback",
         "dual_weak": "Dual weak (λ=0.5)",
         "dual_strong": "Dual strong (λ=3.0)",
@@ -579,6 +617,7 @@ def main():
         "random": "rand",
         "scripted_q2": "script",
         "fim_greedy": "fim",
+        "fim_greedy_cost_matched": "fim/cm",
         "dual_no_precision_feedback": "3/noP",
         "dual_weak": "0.5",
         "dual_strong": "3.0",
