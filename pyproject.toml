@@ -10,6 +10,11 @@ dependencies = [
     "jaxlib>=0.4.30",
 ]
 
+[project.optional-dependencies]
+gpu = [
+    "jax[cuda12]>=0.4.30",
+]
+
 [tool.uv]
 package = true
 

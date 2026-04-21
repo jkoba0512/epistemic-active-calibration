@@ -48,6 +48,9 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 import numpy as np
+import os
+os.environ.setdefault("JAX_PLATFORMS", "cpu")  # pin to CPU; workload is small-tensor / sequential
+
 import jax.numpy as jnp
 
 from src.dem.model import DEMModel

@@ -7,6 +7,9 @@ Tests the mathematical foundations of DEM:
 """
 
 import pytest
+import os
+os.environ.setdefault("JAX_PLATFORMS", "cpu")  # pin to CPU; workload is small-tensor / sequential
+
 import jax.numpy as jnp
 import numpy as np
 

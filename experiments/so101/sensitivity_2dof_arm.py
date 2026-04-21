@@ -30,6 +30,9 @@ project_root = Path(__file__).parents[2]
 sys.path.insert(0, str(project_root))
 
 import numpy as np
+import os
+os.environ.setdefault("JAX_PLATFORMS", "cpu")  # pin to CPU; workload is small-tensor / sequential
+
 import jax.numpy as jnp
 
 # ── reuse physics constants and functions from the main demo ──────────────────
