@@ -1,0 +1,121 @@
+{
+  "0.01": {
+    "vfe_only": {
+      "mean": 1.0,
+      "ci_low": 1.0,
+      "ci_high": 1.0
+    },
+    "dual_weak": {
+      "mean": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 0.0
+    },
+    "fim_greedy_cost_matched": {
+      "mean": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 0.0
+    }
+  },
+  "0.02": {
+    "vfe_only": {
+      "mean": 0.95,
+      "ci_low": 0.85,
+      "ci_high": 1.0
+    },
+    "dual_weak": {
+      "mean": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 0.0
+    },
+    "fim_greedy_cost_matched": {
+      "mean": 0.05,
+      "ci_low": 0.0,
+      "ci_high": 0.15
+    }
+  },
+  "0.03": {
+    "vfe_only": {
+      "mean": 0.95,
+      "ci_low": 0.85,
+      "ci_high": 1.0
+    },
+    "dual_weak": {
+      "mean": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 0.0
+    },
+    "fim_greedy_cost_matched": {
+      "mean": 0.1,
+      "ci_low": 0.0,
+      "ci_high": 0.25
+    }
+  },
+  "0.04": {
+    "vfe_only": {
+      "mean": 0.95,
+      "ci_low": 0.85,
+      "ci_high": 1.0
+    },
+    "dual_weak": {
+      "mean": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 0.0
+    },
+    "fim_greedy_cost_matched": {
+      "mean": 0.2,
+      "ci_low": 0.05,
+      "ci_high": 0.4
+    }
+  },
+  "0.05": {
+    "vfe_only": {
+      "mean": 0.95,
+      "ci_low": 0.85,
+      "ci_high": 1.0
+    },
+    "dual_weak": {
+      "mean": 0.05,
+      "ci_low": 0.0,
+      "ci_high": 0.15
+    },
+    "fim_greedy_cost_matched": {
+      "mean": 0.3,
+      "ci_low": 0.1,
+      "ci_high": 0.5
+    }
+  },
+  "0.075": {
+    "vfe_only": {
+      "mean": 0.95,
+      "ci_low": 0.85,
+      "ci_high": 1.0
+    },
+    "dual_weak": {
+      "mean": 0.3,
+      "ci_low": 0.1,
+      "ci_high": 0.5
+    },
+    "fim_greedy_cost_matched": {
+      "mean": 0.65,
+      "ci_low": 0.45,
+      "ci_high": 0.85
+    }
+  },
+  "0.1": {
+    "vfe_only": {
+      "mean": 0.95,
+      "ci_low": 0.85,
+      "ci_high": 1.0
+    },
+    "dual_weak": {
+      "mean": 0.6,
+      "ci_low": 0.4,
+      "ci_high": 0.8
+    },
+    "fim_greedy_cost_matched": {
+      "mean": 0.75,
+      "ci_low": 0.55,
+      "ci_high": 0.95
+    }
+  }
+}
