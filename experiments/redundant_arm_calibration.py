@@ -50,6 +50,9 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 import numpy as np
+import os
+os.environ.setdefault("JAX_PLATFORMS", "cpu")  # pin to CPU; workload is small-tensor / sequential
+
 import jax
 import jax.numpy as jnp
 
@@ -95,10 +98,54 @@ N_ACTION_ITER = 50      # more iterations for gradient descent to escape flat re
 ALPHA_NS = 1.2          # moderate: balance exploration vs EE hold accuracy
 ESTEP_FREQ = 3          # run E-step every 3 steps (was 5)
 
+# Soft task-compatible probing parameters.
+# PROBE_EPS_Q is the finite q displacement used to score candidate probes.
+# PROBE_U_GAIN is the velocity magnitude for the blended epistemic direction.
+PROBE_DAMPING = 1e-3
+PROBE_U_GAIN = 0.2
+PROBE_EPS_Q = DT * PROBE_U_GAIN
+PROBE_GRAD_EPS = 1e-12
+PROBE_TASK_PENALTY = 1e-3
+PROBE_RANDOM_SEED = 20260421
+PROBE_RANDOM_CANDIDATES = 64
+
 PARAM_RMSE_FAIL = 0.08
 TASK_ERR_FAIL = 0.10    # 4× the null-space median; 1.6× the vfe_only median
 
-CONDITIONS = ["vfe_only", "dual_lambda", "null_space", "null_space_recovery", "null_space_posture"]
+CONDITIONS = [
+    "vfe_only",
+    "dual_lambda",
+    "null_space",
+    "null_space_probe",
+    "null_space_probe_recovery",
+    "null_space_probe_posture",
+    "null_space_probe_recovery_posture",
+    "null_space_recovery",
+    "null_space_posture",
+]
+
+PROBE_FIXED_CANDIDATES = jnp.array([
+    [1.0, -1.0, 1.0, -1.0],
+    [-1.0, 1.0, -1.0, 1.0],
+    [1.0, 1.0, -1.0, -1.0],
+    [-1.0, -1.0, 1.0, 1.0],
+    [1.0, -1.0, -1.0, 1.0],
+    [-1.0, 1.0, 1.0, -1.0],
+    [1.0, 0.0, -1.0, 0.0],
+    [0.0, 1.0, 0.0, -1.0],
+    [1.0, -2.0, 1.0, 0.0],
+    [0.0, 1.0, -2.0, 1.0],
+], dtype=jnp.float64)
+
+_probe_rng = np.random.default_rng(PROBE_RANDOM_SEED)
+_probe_random_candidates = _probe_rng.normal(size=(PROBE_RANDOM_CANDIDATES, N_DOF))
+_probe_random_candidates /= np.linalg.norm(
+    _probe_random_candidates, axis=1, keepdims=True
+)
+PROBE_CANDIDATES = jnp.asarray(
+    np.vstack([np.asarray(PROBE_FIXED_CANDIDATES), _probe_random_candidates]),
+    dtype=jnp.float64,
+)
 
 # Recovery phase parameters (null_space_recovery only)
 # Steps [RECOVERY_START, CHANGE_STEP): stop epistemic, blend EE target toward task goal
@@ -171,6 +218,11 @@ def rollout_step(q, u):
 PI_Y_TASK = 1.0 / 0.05 ** 2
 
 
+def _damped_pseudoinverse(J, damping=PROBE_DAMPING):
+    task_dim = J.shape[0]
+    return J.T @ jnp.linalg.inv(J @ J.T + damping * jnp.eye(task_dim))
+
+
 @jax.jit
 def compute_null_space_action(q, theta_est, P_theta, y_goal):
     """Null-space epistemic action (proposed).
@@ -195,6 +247,68 @@ def compute_null_space_action(q, theta_est, P_theta, y_goal):
     u_epis = ALPHA_NS * N_mat @ ig_grad                      # (4,) in null(J_ee)
 
     return jnp.clip(u_task + u_epis, -U_MAX, U_MAX)
+
+
+@jax.jit
+def compute_null_space_probe_action(q, theta_est, P_theta, y_goal):
+    """Soft null-space IG with finite-step probing.
+
+    alpha_N is the confidence weight on the first-order null-space IG
+    direction.  When the local information gradient is absent or mostly
+    task-disruptive, alpha_N is small and finite-step probing dominates.
+    """
+    J_ee = jax.jacfwd(lambda qi: fk(qi, theta_est))(q)
+    J_hash = _damped_pseudoinverse(J_ee)
+
+    y_ee = fk(q, theta_est)
+    v_task = -K_TASK * (y_ee - y_goal)
+    u_task = J_hash @ v_task
+
+    N_mat = jnp.eye(N_DOF) - J_hash @ J_ee
+    ig_grad = jax.grad(lambda qi: _ig_at_q(qi, theta_est, P_theta))(q)
+    n_grad = N_mat @ ig_grad
+    ig_grad_norm = jnp.linalg.norm(ig_grad)
+    n_grad_norm = jnp.linalg.norm(n_grad)
+    alpha_N = jnp.where(
+        ig_grad_norm > PROBE_GRAD_EPS,
+        jnp.clip(n_grad_norm / (ig_grad_norm + PROBE_GRAD_EPS), 0.0, 1.0),
+        0.0,
+    )
+
+    svals = jnp.linalg.svd(J_ee, compute_uv=False)
+    sigma_min = jnp.min(svals)
+
+    def score_candidate(raw_d):
+        projected = N_mat @ raw_d
+        norm = jnp.linalg.norm(projected)
+        d = jnp.where(
+            norm > PROBE_GRAD_EPS, projected / norm, jnp.zeros_like(projected)
+        )
+        ig_gain = _ig_at_q(q + PROBE_EPS_Q * d, theta_est, P_theta) - _ig_at_q(
+            q, theta_est, P_theta
+        )
+        task_norm = jnp.linalg.norm(J_ee @ d)
+        return ig_gain - PROBE_TASK_PENALTY * task_norm, ig_gain, d
+
+    scores, gains, directions = jax.vmap(score_candidate)(PROBE_CANDIDATES)
+    best_idx = jnp.argmax(scores)
+    d_probe = directions[best_idx]
+    best_gain = gains[best_idx]
+    d_ig = jnp.where(
+        n_grad_norm > PROBE_GRAD_EPS, n_grad / n_grad_norm, jnp.zeros_like(n_grad)
+    )
+    d_soft_raw = alpha_N * d_ig + (1.0 - alpha_N) * d_probe
+    d_soft_norm = jnp.linalg.norm(d_soft_raw)
+    d_soft = jnp.where(
+        d_soft_norm > PROBE_GRAD_EPS,
+        d_soft_raw / d_soft_norm,
+        jnp.zeros_like(d_soft_raw),
+    )
+
+    u_epis = PROBE_U_GAIN * d_soft
+    u = jnp.clip(u_task + u_epis, -U_MAX, U_MAX)
+    probe_weight = 1.0 - alpha_N
+    return u, probe_weight, best_gain, n_grad_norm, sigma_min
 
 
 @jax.jit
@@ -317,13 +431,27 @@ def run_one(seed, condition):
     p_theta_rank_hist = [] # rank of accumulated posterior precision P_θ
     p_theta_logdet_hist = []
     ee_hold_err_hist = []  # Phase 1: true EE distance from Y_GOAL_HOLD
+    probe_mode_hist = []
+    probe_gain_hist = []
+    probe_u_ig_norm_hist = []
+    probe_sigma_min_hist = []
     # θ is frozen at end of Phase 1 to cleanly measure calibration quality
     theta_frozen = None
 
     q_hist, v_hist, y_hist = [], [], []
 
-    n_total = N_STEPS_POSTURE if condition == "null_space_posture" else N_STEPS
+    posture_conditions = (
+        "null_space_posture",
+        "null_space_probe_posture",
+        "null_space_probe_recovery_posture",
+    )
+    n_total = N_STEPS_POSTURE if condition in posture_conditions else N_STEPS
     for t in range(n_total):
+        probe_mode = 0.0
+        probe_gain = 0.0
+        probe_u_ig_norm = 0.0
+        probe_sigma_min = 0.0
+
         # ---- Record metrics ----
         rmse_hist.append(float(jnp.sqrt(jnp.mean((theta_est - THETA_TRUE) ** 2))))
         ee_true = fk(q, THETA_TRUE)
@@ -346,6 +474,28 @@ def run_one(seed, condition):
                 u = optimize_dual_action(q, theta_est, P_theta, Y_GOAL_HOLD, u)
             elif condition == "null_space":
                 u = compute_null_space_action(q, theta_est, P_theta, Y_GOAL_HOLD)
+            elif condition == "null_space_probe":
+                u, probe_mode, probe_gain, probe_u_ig_norm, probe_sigma_min = (
+                    compute_null_space_probe_action(q, theta_est, P_theta, Y_GOAL_HOLD)
+                )
+            elif condition == "null_space_probe_recovery":
+                if t < RECOVERY_START:
+                    u, probe_mode, probe_gain, probe_u_ig_norm, probe_sigma_min = (
+                        compute_null_space_probe_action(q, theta_est, P_theta, Y_GOAL_HOLD)
+                    )
+                else:
+                    blend = (t - RECOVERY_START) / (CHANGE_STEP - RECOVERY_START)
+                    y_blend = (1.0 - blend) * Y_GOAL_HOLD + blend * Y_GOAL_TASK
+                    u = compute_vfe_only_action(q, theta_est, y_blend)
+            elif condition in ("null_space_probe_posture", "null_space_probe_recovery_posture"):
+                if condition == "null_space_probe_recovery_posture" and t >= RECOVERY_START:
+                    blend = (t - RECOVERY_START) / (CHANGE_STEP - RECOVERY_START)
+                    y_blend = (1.0 - blend) * Y_GOAL_HOLD + blend * Y_GOAL_TASK
+                    u = compute_vfe_only_action(q, theta_est, y_blend)
+                else:
+                    u, probe_mode, probe_gain, probe_u_ig_norm, probe_sigma_min = (
+                        compute_null_space_probe_action(q, theta_est, P_theta, Y_GOAL_HOLD)
+                    )
             elif condition == "null_space_recovery":
                 if t < RECOVERY_START:
                     u = compute_null_space_action(q, theta_est, P_theta, Y_GOAL_HOLD)
@@ -359,10 +509,15 @@ def run_one(seed, condition):
             # Phase 2: task execution with FROZEN θ (no further calibration)
             if theta_frozen is None:
                 theta_frozen = theta_est
-            if condition == "null_space_posture":
+            if condition in posture_conditions:
                 u = compute_posture_task_action(q, theta_frozen, Y_GOAL_TASK)
             else:
                 u = compute_vfe_only_action(q, theta_frozen, Y_GOAL_TASK)
+
+        probe_mode_hist.append(float(probe_mode))
+        probe_gain_hist.append(float(probe_gain))
+        probe_u_ig_norm_hist.append(float(probe_u_ig_norm))
+        probe_sigma_min_hist.append(float(probe_sigma_min))
 
         # ---- Apply action and observe ----
         q = rollout_step(q, u)
@@ -390,11 +545,19 @@ def run_one(seed, condition):
         "p_theta_rank": np.array(p_theta_rank_hist),
         "p_theta_logdet": np.array(p_theta_logdet_hist),
         "ee_hold_err": np.array(ee_hold_err_hist),
+        "probe_mode": np.array(probe_mode_hist),
+        "probe_gain": np.array(probe_gain_hist),
+        "probe_u_ig_norm": np.array(probe_u_ig_norm_hist),
+        "probe_sigma_min": np.array(probe_sigma_min_hist),
         "theta_final_ph1": np.array(theta_end_ph1),
         # Per-seed Phase-1-end diagnostics for failure analysis
         "rmse_at_change": float(np.array(rmse_hist)[CHANGE_STEP - 1]),
         "task_err_final": float(np.array(task_err_hist)[-1]),
         "ee_hold_mean": float(np.mean(np.abs(np.array(ee_hold_err_hist)[:CHANGE_STEP]))),
+        "probe_weight_mean_phase1": float(
+            np.mean(np.array(probe_mode_hist)[:CHANGE_STEP])
+        ),
+        "probe_gain_max_phase1": float(np.max(np.array(probe_gain_hist)[:CHANGE_STEP])),
         "p_theta_rank_at_change": int(np.array(p_theta_rank_hist)[CHANGE_STEP - 1]),
         "p_theta_min_eig": p_final["min_eig"],
         "p_theta_cond": p_final["cond"],
@@ -428,11 +591,18 @@ def main():
     # Summary statistics
     # -----------------------------------------------------------------------
     COLORS = {"vfe_only": "C3", "dual_lambda": "C0", "null_space": "C2",
+              "null_space_probe": "C5", "null_space_probe_recovery": "C6",
+              "null_space_probe_posture": "C7",
+              "null_space_probe_recovery_posture": "C8",
               "null_space_recovery": "C4", "null_space_posture": "C1"}
     LABELS = {
         "vfe_only":             "VFE only (task, no epistemic)",
         "dual_lambda":          f"Dual control (λ={LAMBDA_DUAL})",
         "null_space":           "Null-space epistemic (proposed)",
+        "null_space_probe":     "Null-space + finite-step probing",
+        "null_space_probe_recovery": "Probe + recovery",
+        "null_space_probe_posture":  "Probe + posture Ph2",
+        "null_space_probe_recovery_posture": "Probe + recovery + posture Ph2",
         "null_space_recovery":  "Null-space + recovery (proposed+)",
         "null_space_posture":   f"Null-space + posture Ph2 ×4 steps (proposed++)",
     }
@@ -456,6 +626,12 @@ def main():
             "task_err_final": _summarize(task_final),
             "ee_hold_err_phase1": _summarize(ee_hold),
             "p_theta_rank_at_change": _summarize(prank_at_ch),
+            "probe_weight_mean_phase1": _summarize(
+                [r["probe_weight_mean_phase1"] for r in results[cond]]
+            ),
+            "probe_gain_max_phase1": _summarize(
+                [r["probe_gain_max_phase1"] for r in results[cond]]
+            ),
             "rmse_failure_rate": fail_rmse,
             "task_failure_rate": fail_task,
         }
@@ -505,6 +681,8 @@ def main():
                     "rmse_at_change": float(rmse_ch),
                     "task_err_final": float(task_f),
                     "ee_hold_mean": float(ee_hold),
+                    "probe_weight_mean_phase1": float(r["probe_weight_mean_phase1"]),
+                    "probe_gain_max_phase1": float(r["probe_gain_max_phase1"]),
                     "p_theta_rank_at_change": int(prank),
                     "p_theta_min_eig": float(r["p_theta_min_eig"]),
                     "p_theta_cond": float(r["p_theta_cond"]),
