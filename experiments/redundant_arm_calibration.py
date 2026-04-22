@@ -417,7 +417,15 @@ def _summarize(values):
 # ---------------------------------------------------------------------------
 # Single run
 # ---------------------------------------------------------------------------
-def run_one(seed, condition):
+def run_one(seed, condition,
+            phase2_horizon_override=None,
+            phase2_controller_override=None):
+    """Run one seed of the redundant-arm calibration experiment.
+
+    phase2_horizon_override: int, overrides the number of Phase 2 steps.
+    phase2_controller_override: "plain" or "posture", overrides Phase 2 controller.
+    Both default to None (condition-based behaviour unchanged).
+    """
     rng = np.random.default_rng(seed)
     theta_est = THETA_INIT.copy()
     P_theta = PARAMS_PRIOR_PI * jnp.eye(N_DOF)
@@ -456,7 +464,10 @@ def run_one(seed, condition):
         "null_space_probe_plain_200",    # ablation: plain ctrl, long horizon
     ])
     posture_conditions = _posture_ctrl | _long_horizon  # kept for legacy n_total check
-    n_total = N_STEPS_POSTURE if condition in _long_horizon else N_STEPS
+    if phase2_horizon_override is not None:
+        n_total = CHANGE_STEP + phase2_horizon_override
+    else:
+        n_total = N_STEPS_POSTURE if condition in _long_horizon else N_STEPS
     for t in range(n_total):
         probe_mode = 0.0
         probe_gain = 0.0
@@ -526,7 +537,11 @@ def run_one(seed, condition):
             if theta_frozen is None:
                 theta_frozen = theta_est
                 q_change = np.array(q)
-            if condition in _posture_ctrl:
+            use_posture = (
+                phase2_controller_override == "posture"
+                or (phase2_controller_override is None and condition in _posture_ctrl)
+            )
+            if use_posture:
                 u = compute_posture_task_action(q, theta_frozen, Y_GOAL_TASK)
             else:
                 u = compute_vfe_only_action(q, theta_frozen, Y_GOAL_TASK)
