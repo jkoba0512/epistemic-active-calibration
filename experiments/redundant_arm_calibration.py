@@ -441,12 +441,22 @@ def run_one(seed, condition):
 
     q_hist, v_hist, y_hist = [], [], []
 
-    posture_conditions = (
+    # Conditions that use the posture controller in Phase 2
+    _posture_ctrl = frozenset([
         "null_space_posture",
         "null_space_probe_posture",
         "null_space_probe_recovery_posture",
-    )
-    n_total = N_STEPS_POSTURE if condition in posture_conditions else N_STEPS
+        "null_space_probe_posture_50",   # ablation: posture ctrl, short horizon
+    ])
+    # Conditions that use the longer Phase 2 horizon (200 steps instead of 50)
+    _long_horizon = frozenset([
+        "null_space_posture",
+        "null_space_probe_posture",
+        "null_space_probe_recovery_posture",
+        "null_space_probe_plain_200",    # ablation: plain ctrl, long horizon
+    ])
+    posture_conditions = _posture_ctrl | _long_horizon  # kept for legacy n_total check
+    n_total = N_STEPS_POSTURE if condition in _long_horizon else N_STEPS
     for t in range(n_total):
         probe_mode = 0.0
         probe_gain = 0.0
@@ -488,7 +498,12 @@ def run_one(seed, condition):
                     blend = (t - RECOVERY_START) / (CHANGE_STEP - RECOVERY_START)
                     y_blend = (1.0 - blend) * Y_GOAL_HOLD + blend * Y_GOAL_TASK
                     u = compute_vfe_only_action(q, theta_est, y_blend)
-            elif condition in ("null_space_probe_posture", "null_space_probe_recovery_posture"):
+            elif condition in (
+                "null_space_probe_posture",
+                "null_space_probe_recovery_posture",
+                "null_space_probe_plain_200",   # ablation
+                "null_space_probe_posture_50",  # ablation
+            ):
                 if condition == "null_space_probe_recovery_posture" and t >= RECOVERY_START:
                     blend = (t - RECOVERY_START) / (CHANGE_STEP - RECOVERY_START)
                     y_blend = (1.0 - blend) * Y_GOAL_HOLD + blend * Y_GOAL_TASK
@@ -511,7 +526,7 @@ def run_one(seed, condition):
             if theta_frozen is None:
                 theta_frozen = theta_est
                 q_change = np.array(q)
-            if condition in posture_conditions:
+            if condition in _posture_ctrl:
                 u = compute_posture_task_action(q, theta_frozen, Y_GOAL_TASK)
             else:
                 u = compute_vfe_only_action(q, theta_frozen, Y_GOAL_TASK)
