@@ -106,6 +106,10 @@ PROBE_U_GAIN = 0.2
 PROBE_EPS_Q = DT * PROBE_U_GAIN
 PROBE_GRAD_EPS = 1e-12
 PROBE_TASK_PENALTY = 1e-3
+# Terminal risk penalty for risk-aware probing (Phase 4).
+# Proxy: 1 / (||q_next||^2 + PROBE_TERMINAL_EPS) — penalises staying near q=0.
+PROBE_TERMINAL_PENALTY = 0.01
+PROBE_TERMINAL_EPS = 0.1      # denominator offset: risk ≈ 10 at q=0, ≈ 1 at ||q||=1
 PROBE_RANDOM_SEED = 20260421
 PROBE_RANDOM_CANDIDATES = 64
 
@@ -289,6 +293,76 @@ def compute_null_space_probe_action(q, theta_est, P_theta, y_goal):
         )
         task_norm = jnp.linalg.norm(J_ee @ d)
         return ig_gain - PROBE_TASK_PENALTY * task_norm, ig_gain, d
+
+    scores, gains, directions = jax.vmap(score_candidate)(PROBE_CANDIDATES)
+    best_idx = jnp.argmax(scores)
+    d_probe = directions[best_idx]
+    best_gain = gains[best_idx]
+    d_ig = jnp.where(
+        n_grad_norm > PROBE_GRAD_EPS, n_grad / n_grad_norm, jnp.zeros_like(n_grad)
+    )
+    d_soft_raw = alpha_N * d_ig + (1.0 - alpha_N) * d_probe
+    d_soft_norm = jnp.linalg.norm(d_soft_raw)
+    d_soft = jnp.where(
+        d_soft_norm > PROBE_GRAD_EPS,
+        d_soft_raw / d_soft_norm,
+        jnp.zeros_like(d_soft_raw),
+    )
+
+    u_epis = PROBE_U_GAIN * d_soft
+    u = jnp.clip(u_task + u_epis, -U_MAX, U_MAX)
+    probe_weight = 1.0 - alpha_N
+    return u, probe_weight, best_gain, n_grad_norm, sigma_min
+
+
+@jax.jit
+def compute_null_space_probe_risk_action(q, theta_est, P_theta, y_goal):
+    """Phase 1 probe action with terminal control risk penalty.
+
+    Identical to compute_null_space_probe_action, but the candidate score
+    includes a posture-potential penalty:
+
+        score(d) = IG(q + eps*d; b)
+                 - PROBE_TASK_PENALTY   * ||J(q) d||
+                 - PROBE_TERMINAL_PENALTY / (||q + eps*d||^2 + PROBE_TERMINAL_EPS)
+
+    The terminal penalty discourages probe directions that keep the arm near
+    q = 0 (the near-singular fully-extended configuration), steering q_change
+    toward better-conditioned postures for Phase 2.
+    """
+    J_ee = jax.jacfwd(lambda qi: fk(qi, theta_est))(q)
+    J_hash = _damped_pseudoinverse(J_ee)
+
+    y_ee = fk(q, theta_est)
+    v_task = -K_TASK * (y_ee - y_goal)
+    u_task = J_hash @ v_task
+
+    N_mat = jnp.eye(N_DOF) - J_hash @ J_ee
+    ig_grad = jax.grad(lambda qi: _ig_at_q(qi, theta_est, P_theta))(q)
+    n_grad = N_mat @ ig_grad
+    ig_grad_norm = jnp.linalg.norm(ig_grad)
+    n_grad_norm = jnp.linalg.norm(n_grad)
+    alpha_N = jnp.where(
+        ig_grad_norm > PROBE_GRAD_EPS,
+        jnp.clip(n_grad_norm / (ig_grad_norm + PROBE_GRAD_EPS), 0.0, 1.0),
+        0.0,
+    )
+
+    svals = jnp.linalg.svd(J_ee, compute_uv=False)
+    sigma_min = jnp.min(svals)
+
+    def score_candidate(raw_d):
+        projected = N_mat @ raw_d
+        norm = jnp.linalg.norm(projected)
+        d = jnp.where(
+            norm > PROBE_GRAD_EPS, projected / norm, jnp.zeros_like(projected)
+        )
+        q_next = q + PROBE_EPS_Q * d
+        ig_gain = _ig_at_q(q_next, theta_est, P_theta) - _ig_at_q(q, theta_est, P_theta)
+        task_norm = jnp.linalg.norm(J_ee @ d)
+        r_terminal = 1.0 / (jnp.sum(q_next ** 2) + PROBE_TERMINAL_EPS)
+        score = ig_gain - PROBE_TASK_PENALTY * task_norm - PROBE_TERMINAL_PENALTY * r_terminal
+        return score, ig_gain, d
 
     scores, gains, directions = jax.vmap(score_candidate)(PROBE_CANDIDATES)
     best_idx = jnp.argmax(scores)
@@ -509,6 +583,10 @@ def run_one(seed, condition,
                     blend = (t - RECOVERY_START) / (CHANGE_STEP - RECOVERY_START)
                     y_blend = (1.0 - blend) * Y_GOAL_HOLD + blend * Y_GOAL_TASK
                     u = compute_vfe_only_action(q, theta_est, y_blend)
+            elif condition == "null_space_probe_risk":
+                u, probe_mode, probe_gain, probe_u_ig_norm, probe_sigma_min = (
+                    compute_null_space_probe_risk_action(q, theta_est, P_theta, Y_GOAL_HOLD)
+                )
             elif condition in (
                 "null_space_probe_posture",
                 "null_space_probe_recovery_posture",
