@@ -495,6 +495,55 @@ def compute_posture_task_action(q, theta_est, y_goal):
 
 
 @jax.jit
+def compute_adaptive_posture_task_action(q, theta_est, y_goal):
+    """Phase 2 with adaptive null-space posture: k_eff = k / (||q|| + eps).
+
+    Larger gain when arm is near q=0 (degenerate config), smaller when
+    joints are already displaced — avoids fighting task convergence.
+    """
+    J_ee = jax.jacfwd(lambda qi: fk(qi, theta_est))(q)
+    J_pinv = jnp.linalg.pinv(J_ee)
+    y_ee = fk(q, theta_est)
+    v_task = -K_TASK * (y_ee - y_goal)
+    u_task = J_pinv @ v_task
+    N_mat = jnp.eye(N_DOF) - J_pinv @ J_ee
+    q_norm = jnp.linalg.norm(q)
+    k_eff = POSTURE_GAIN / (q_norm + 0.1)
+    u_posture = N_mat @ (-k_eff * q)
+    return jnp.clip(u_task + u_posture, -U_MAX, U_MAX)
+
+
+@jax.jit
+def compute_manip_posture_task_action(q, theta_est, y_goal):
+    """Phase 2 with manipulability-maximising null-space posture.
+
+    Posture direction: -grad_q log det(J J^T)  (ascent on manipulability).
+    Pulls joints away from singular configurations.
+    """
+    J_ee = jax.jacfwd(lambda qi: fk(qi, theta_est))(q)
+    J_pinv = jnp.linalg.pinv(J_ee)
+    y_ee = fk(q, theta_est)
+    v_task = -K_TASK * (y_ee - y_goal)
+    u_task = J_pinv @ v_task
+    N_mat = jnp.eye(N_DOF) - J_pinv @ J_ee
+
+    def log_manip(qi):
+        Ji = jax.jacfwd(lambda qj: fk(qj, theta_est))(qi)
+        _, ld = jnp.linalg.slogdet(Ji @ Ji.T)
+        return ld
+
+    manip_grad = jax.grad(log_manip)(q)
+    manip_grad_norm = jnp.linalg.norm(manip_grad)
+    manip_dir = jnp.where(
+        manip_grad_norm > PROBE_GRAD_EPS,
+        manip_grad / manip_grad_norm,
+        jnp.zeros_like(manip_grad),
+    )
+    u_posture = N_mat @ (POSTURE_GAIN * manip_dir)
+    return jnp.clip(u_task + u_posture, -U_MAX, U_MAX)
+
+
+@jax.jit
 def compute_vfe_only_action(q, theta_est, y_goal):
     """Pure task-space action: u = J_ee⁺ v_task."""
     J_ee = jax.jacfwd(lambda qi: fk(qi, theta_est))(q)
@@ -583,7 +632,8 @@ def _summarize(values):
 # ---------------------------------------------------------------------------
 def run_one(seed, condition,
             phase2_horizon_override=None,
-            phase2_controller_override=None):
+            phase2_controller_override=None,
+            return_trajectory=False):
     """Run one seed of the redundant-arm calibration experiment.
 
     phase2_horizon_override: int, overrides the number of Phase 2 steps.
@@ -711,12 +761,15 @@ def run_one(seed, condition,
             if theta_frozen is None:
                 theta_frozen = theta_est
                 q_change = np.array(q)
-            use_posture = (
-                phase2_controller_override == "posture"
-                or (phase2_controller_override is None and condition in _posture_ctrl)
+            ctrl = phase2_controller_override or (
+                "posture" if condition in _posture_ctrl else "plain"
             )
-            if use_posture:
+            if ctrl == "posture":
                 u = compute_posture_task_action(q, theta_frozen, Y_GOAL_TASK)
+            elif ctrl == "adaptive_posture":
+                u = compute_adaptive_posture_task_action(q, theta_frozen, Y_GOAL_TASK)
+            elif ctrl == "manip_posture":
+                u = compute_manip_posture_task_action(q, theta_frozen, Y_GOAL_TASK)
             else:
                 u = compute_vfe_only_action(q, theta_frozen, Y_GOAL_TASK)
 
@@ -746,7 +799,7 @@ def run_one(seed, condition,
     q_end_ph1 = q_change if q_change is not None else np.array(q)
     # Final P_theta diagnostics (for failure analysis)
     p_final = _matrix_diag(P_theta)
-    return {
+    result = {
         "rmse": np.array(rmse_hist),
         "task_err": np.array(task_err_hist),
         "p_theta_rank": np.array(p_theta_rank_hist),
@@ -770,6 +823,11 @@ def run_one(seed, condition,
         "p_theta_min_eig": p_final["min_eig"],
         "p_theta_cond": p_final["cond"],
     }
+    if return_trajectory:
+        result["q_trajectory_phase1"] = np.array(
+            [np.array(q) for q in q_hist[:CHANGE_STEP]]
+        )
+    return result
 
 
 # ---------------------------------------------------------------------------
