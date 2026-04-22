@@ -426,6 +426,7 @@ def run_one(seed, condition):
     q = Q0.copy()
     u = jnp.zeros(N_DOF)
 
+    q_change = None   # q at start of Phase 2 (after Phase 1 final rollout)
     rmse_hist = []
     task_err_hist = []     # Phase 2: true EE distance to Y_GOAL_TASK
     p_theta_rank_hist = [] # rank of accumulated posterior precision P_θ
@@ -509,6 +510,7 @@ def run_one(seed, condition):
             # Phase 2: task execution with FROZEN θ (no further calibration)
             if theta_frozen is None:
                 theta_frozen = theta_est
+                q_change = np.array(q)
             if condition in posture_conditions:
                 u = compute_posture_task_action(q, theta_frozen, Y_GOAL_TASK)
             else:
@@ -537,6 +539,7 @@ def run_one(seed, condition):
             estep = _build_estep(theta_est)
 
     theta_end_ph1 = theta_frozen if theta_frozen is not None else theta_est
+    q_end_ph1 = q_change if q_change is not None else np.array(q)
     # Final P_theta diagnostics (for failure analysis)
     p_final = _matrix_diag(P_theta)
     return {
@@ -550,6 +553,7 @@ def run_one(seed, condition):
         "probe_u_ig_norm": np.array(probe_u_ig_norm_hist),
         "probe_sigma_min": np.array(probe_sigma_min_hist),
         "theta_final_ph1": np.array(theta_end_ph1),
+        "q_change": q_end_ph1,
         # Per-seed Phase-1-end diagnostics for failure analysis
         "rmse_at_change": float(np.array(rmse_hist)[CHANGE_STEP - 1]),
         "task_err_final": float(np.array(task_err_hist)[-1]),
