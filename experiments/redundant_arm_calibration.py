@@ -110,6 +110,11 @@ PROBE_TASK_PENALTY = 1e-3
 # Proxy: 1 / (||q_next||^2 + PROBE_TERMINAL_EPS) — penalises staying near q=0.
 PROBE_TERMINAL_PENALTY = 0.01
 PROBE_TERMINAL_EPS = 0.1      # denominator offset: risk ≈ 10 at q=0, ≈ 1 at ||q||=1
+# Short noiseless rollout risk penalty for risk-aware probing (Phase 5).
+# K-step plain-controller rollout from q_next using theta_hat; penalises
+# candidate directions that leave the arm in poor Phase-2 convergence postures.
+PROBE_ROLLOUT_K = 10
+PROBE_ROLLOUT_PENALTY = 0.2
 PROBE_RANDOM_SEED = 20260421
 PROBE_RANDOM_CANDIDATES = 64
 
@@ -386,6 +391,91 @@ def compute_null_space_probe_risk_action(q, theta_est, P_theta, y_goal):
 
 
 @jax.jit
+def compute_null_space_probe_rollout_risk_action(q, theta_est, P_theta, y_goal):
+    """Phase 1 probe with K-step noiseless rollout risk penalty (Phase 5).
+
+    score(d) = IG(q + eps*d; b)
+             - PROBE_TASK_PENALTY   * ||J(q) d||
+             - PROBE_ROLLOUT_PENALTY * R_rollout_K(q + eps*d, theta_hat, K)
+
+    R_rollout_K is a PROBE_ROLLOUT_K-step noiseless plain-controller rollout
+    from q + eps*d, using theta_hat for both action and EE evaluation against
+    Y_GOAL_TASK.  This penalises candidate directions that lead to q_change
+    configurations where Phase 2 converges slowly — the metric that K=10 rollout
+    AUC showed to be nearly perfect (AUC ≈ 1.0 at H≤100, 0.986 at H=200).
+
+    The Python-level loop is unrolled at JIT trace time, producing a single
+    static computation graph that JAX can optimise.  vmap over PROBE_CANDIDATES
+    parallelises all 74 candidate evaluations.
+    """
+    J_ee = jax.jacfwd(lambda qi: fk(qi, theta_est))(q)
+    J_hash = _damped_pseudoinverse(J_ee)
+
+    y_ee = fk(q, theta_est)
+    v_task = -K_TASK * (y_ee - y_goal)
+    u_task = J_hash @ v_task
+
+    N_mat = jnp.eye(N_DOF) - J_hash @ J_ee
+    ig_grad = jax.grad(lambda qi: _ig_at_q(qi, theta_est, P_theta))(q)
+    n_grad = N_mat @ ig_grad
+    ig_grad_norm = jnp.linalg.norm(ig_grad)
+    n_grad_norm = jnp.linalg.norm(n_grad)
+    alpha_N = jnp.where(
+        ig_grad_norm > PROBE_GRAD_EPS,
+        jnp.clip(n_grad_norm / (ig_grad_norm + PROBE_GRAD_EPS), 0.0, 1.0),
+        0.0,
+    )
+
+    svals = jnp.linalg.svd(J_ee, compute_uv=False)
+    sigma_min = jnp.min(svals)
+
+    def score_candidate(raw_d):
+        projected = N_mat @ raw_d
+        norm = jnp.linalg.norm(projected)
+        d = jnp.where(
+            norm > PROBE_GRAD_EPS, projected / norm, jnp.zeros_like(projected)
+        )
+        q_next = q + PROBE_EPS_Q * d
+        ig_gain = _ig_at_q(q_next, theta_est, P_theta) - _ig_at_q(q, theta_est, P_theta)
+        task_norm = jnp.linalg.norm(J_ee @ d)
+
+        # K-step noiseless rollout: Python loop unrolled by JIT at trace time
+        q_r = q_next
+        for _ in range(PROBE_ROLLOUT_K):
+            J_r = jax.jacfwd(lambda qi: fk(qi, theta_est))(q_r)
+            J_pinv_r = jnp.linalg.pinv(J_r)
+            y_r = fk(q_r, theta_est)
+            v_r = -K_TASK * (y_r - Y_GOAL_TASK)
+            u_r = jnp.clip(J_pinv_r @ v_r, -U_MAX, U_MAX)
+            q_r = rollout_step(q_r, u_r)
+        ee_final = fk(q_r, theta_est)
+        r_rollout = jnp.sqrt(jnp.sum((ee_final - Y_GOAL_TASK) ** 2))
+
+        score = ig_gain - PROBE_TASK_PENALTY * task_norm - PROBE_ROLLOUT_PENALTY * r_rollout
+        return score, ig_gain, d
+
+    scores, gains, directions = jax.vmap(score_candidate)(PROBE_CANDIDATES)
+    best_idx = jnp.argmax(scores)
+    d_probe = directions[best_idx]
+    best_gain = gains[best_idx]
+    d_ig = jnp.where(
+        n_grad_norm > PROBE_GRAD_EPS, n_grad / n_grad_norm, jnp.zeros_like(n_grad)
+    )
+    d_soft_raw = alpha_N * d_ig + (1.0 - alpha_N) * d_probe
+    d_soft_norm = jnp.linalg.norm(d_soft_raw)
+    d_soft = jnp.where(
+        d_soft_norm > PROBE_GRAD_EPS,
+        d_soft_raw / d_soft_norm,
+        jnp.zeros_like(d_soft_raw),
+    )
+
+    u_epis = PROBE_U_GAIN * d_soft
+    u = jnp.clip(u_task + u_epis, -U_MAX, U_MAX)
+    probe_weight = 1.0 - alpha_N
+    return u, probe_weight, best_gain, n_grad_norm, sigma_min
+
+
+@jax.jit
 def compute_posture_task_action(q, theta_est, y_goal):
     """Phase 2 action with null-space posture regularization.
 
@@ -586,6 +676,12 @@ def run_one(seed, condition,
             elif condition == "null_space_probe_risk":
                 u, probe_mode, probe_gain, probe_u_ig_norm, probe_sigma_min = (
                     compute_null_space_probe_risk_action(q, theta_est, P_theta, Y_GOAL_HOLD)
+                )
+            elif condition == "null_space_probe_rollout_risk":
+                u, probe_mode, probe_gain, probe_u_ig_norm, probe_sigma_min = (
+                    compute_null_space_probe_rollout_risk_action(
+                        q, theta_est, P_theta, Y_GOAL_HOLD
+                    )
                 )
             elif condition in (
                 "null_space_probe_posture",
