@@ -115,6 +115,7 @@ PROBE_TERMINAL_EPS = 0.1      # denominator offset: risk ≈ 10 at q=0, ≈ 1 at
 # candidate directions that leave the arm in poor Phase-2 convergence postures.
 PROBE_ROLLOUT_K = 10
 PROBE_ROLLOUT_PENALTY = 0.2
+PROBE_ROLLOUT_LATE_START = CHANGE_STEP - 30
 PROBE_RANDOM_SEED = 20260421
 PROBE_RANDOM_CANDIDATES = 64
 
@@ -495,6 +496,23 @@ def compute_posture_task_action(q, theta_est, y_goal):
 
 
 @jax.jit
+def compute_posture_task_action_ref(q, theta_est, y_goal, q_ref):
+    """Phase 2 posture with arbitrary joint reference: N @ (-k * (q - q_ref)).
+
+    Generalises compute_posture_task_action (which uses q_ref=0).
+    Used in Phase 9 q_ref sensitivity analysis.
+    """
+    J_ee = jax.jacfwd(lambda qi: fk(qi, theta_est))(q)
+    J_pinv = jnp.linalg.pinv(J_ee)
+    y_ee = fk(q, theta_est)
+    v_task = -K_TASK * (y_ee - y_goal)
+    u_task = J_pinv @ v_task
+    N_mat = jnp.eye(N_DOF) - J_pinv @ J_ee
+    u_posture = N_mat @ (-POSTURE_GAIN * (q - q_ref))
+    return jnp.clip(u_task + u_posture, -U_MAX, U_MAX)
+
+
+@jax.jit
 def compute_adaptive_posture_task_action(q, theta_est, y_goal):
     """Phase 2 with adaptive null-space posture: k_eff = k / (||q|| + eps).
 
@@ -633,19 +651,30 @@ def _summarize(values):
 def run_one(seed, condition,
             phase2_horizon_override=None,
             phase2_controller_override=None,
-            return_trajectory=False):
+            return_trajectory=False,
+            q0_override=None,
+            q_ref_override=None):
     """Run one seed of the redundant-arm calibration experiment.
 
     phase2_horizon_override: int, overrides the number of Phase 2 steps.
-    phase2_controller_override: "plain" or "posture", overrides Phase 2 controller.
-    Both default to None (condition-based behaviour unchanged).
+    phase2_controller_override: "plain"/"posture"/etc., overrides Phase 2 controller.
+    q0_override: array-like (4,), overrides the initial joint configuration Q0.
+                 The Phase 1 hold goal is recomputed as fk(q0, THETA_TRUE).
+    q_ref_override: array-like (4,), overrides the posture reference in Phase 2.
+                    Only used when ctrl=="posture" (replaces the default q_ref=0).
+    All default to None (condition-based behaviour unchanged).
     """
     rng = np.random.default_rng(seed)
     theta_est = THETA_INIT.copy()
     P_theta = PARAMS_PRIOR_PI * jnp.eye(N_DOF)
     estep = _build_estep(theta_est)
 
-    q = Q0.copy()
+    # q0 and hold goal — allow override for generalisation experiments
+    q0 = jnp.array(q0_override, dtype=jnp.float64) if q0_override is not None else Q0
+    y_goal_hold = fk(q0, THETA_TRUE) if q0_override is not None else Y_GOAL_HOLD
+    q_ref = jnp.array(q_ref_override, dtype=jnp.float64) if q_ref_override is not None else jnp.zeros(N_DOF)
+
+    q = q0.copy()
     u = jnp.zeros(N_DOF)
 
     q_change = None   # q at start of Phase 2 (after Phase 1 final rollout)
@@ -692,7 +721,7 @@ def run_one(seed, condition,
         rmse_hist.append(float(jnp.sqrt(jnp.mean((theta_est - THETA_TRUE) ** 2))))
         ee_true = fk(q, THETA_TRUE)
         task_err_hist.append(float(jnp.sqrt(jnp.sum((ee_true - Y_GOAL_TASK) ** 2))))
-        ee_hold_err_hist.append(float(jnp.sqrt(jnp.sum((ee_true - Y_GOAL_HOLD) ** 2))))
+        ee_hold_err_hist.append(float(jnp.sqrt(jnp.sum((ee_true - y_goal_hold) ** 2))))
 
         # Rank of accumulated data FIM = P_theta - prior * I
         # (prior is always rank-4; we want to track the DATA contribution)
@@ -703,36 +732,47 @@ def run_one(seed, condition,
 
         # ---- Select action ----
         if t < CHANGE_STEP:
-            # Phase 1: calibration while holding EE near Y_GOAL_HOLD
+            # Phase 1: calibration while holding EE near y_goal_hold
             if condition == "vfe_only":
-                u = compute_vfe_only_action(q, theta_est, Y_GOAL_HOLD)
+                u = compute_vfe_only_action(q, theta_est, y_goal_hold)
             elif condition == "dual_lambda":
-                u = optimize_dual_action(q, theta_est, P_theta, Y_GOAL_HOLD, u)
+                u = optimize_dual_action(q, theta_est, P_theta, y_goal_hold, u)
             elif condition == "null_space":
-                u = compute_null_space_action(q, theta_est, P_theta, Y_GOAL_HOLD)
+                u = compute_null_space_action(q, theta_est, P_theta, y_goal_hold)
             elif condition == "null_space_probe":
                 u, probe_mode, probe_gain, probe_u_ig_norm, probe_sigma_min = (
-                    compute_null_space_probe_action(q, theta_est, P_theta, Y_GOAL_HOLD)
+                    compute_null_space_probe_action(q, theta_est, P_theta, y_goal_hold)
                 )
             elif condition == "null_space_probe_recovery":
                 if t < RECOVERY_START:
                     u, probe_mode, probe_gain, probe_u_ig_norm, probe_sigma_min = (
-                        compute_null_space_probe_action(q, theta_est, P_theta, Y_GOAL_HOLD)
+                        compute_null_space_probe_action(q, theta_est, P_theta, y_goal_hold)
                     )
                 else:
                     blend = (t - RECOVERY_START) / (CHANGE_STEP - RECOVERY_START)
-                    y_blend = (1.0 - blend) * Y_GOAL_HOLD + blend * Y_GOAL_TASK
+                    y_blend = (1.0 - blend) * y_goal_hold + blend * Y_GOAL_TASK
                     u = compute_vfe_only_action(q, theta_est, y_blend)
             elif condition == "null_space_probe_risk":
                 u, probe_mode, probe_gain, probe_u_ig_norm, probe_sigma_min = (
-                    compute_null_space_probe_risk_action(q, theta_est, P_theta, Y_GOAL_HOLD)
+                    compute_null_space_probe_risk_action(q, theta_est, P_theta, y_goal_hold)
                 )
             elif condition == "null_space_probe_rollout_risk":
                 u, probe_mode, probe_gain, probe_u_ig_norm, probe_sigma_min = (
                     compute_null_space_probe_rollout_risk_action(
-                        q, theta_est, P_theta, Y_GOAL_HOLD
+                        q, theta_est, P_theta, y_goal_hold
                     )
                 )
+            elif condition == "null_space_probe_rollout_risk_late":
+                if t < PROBE_ROLLOUT_LATE_START:
+                    u, probe_mode, probe_gain, probe_u_ig_norm, probe_sigma_min = (
+                        compute_null_space_probe_action(q, theta_est, P_theta, y_goal_hold)
+                    )
+                else:
+                    u, probe_mode, probe_gain, probe_u_ig_norm, probe_sigma_min = (
+                        compute_null_space_probe_rollout_risk_action(
+                            q, theta_est, P_theta, y_goal_hold
+                        )
+                    )
             elif condition in (
                 "null_space_probe_posture",
                 "null_space_probe_recovery_posture",
@@ -741,21 +781,21 @@ def run_one(seed, condition,
             ):
                 if condition == "null_space_probe_recovery_posture" and t >= RECOVERY_START:
                     blend = (t - RECOVERY_START) / (CHANGE_STEP - RECOVERY_START)
-                    y_blend = (1.0 - blend) * Y_GOAL_HOLD + blend * Y_GOAL_TASK
+                    y_blend = (1.0 - blend) * y_goal_hold + blend * Y_GOAL_TASK
                     u = compute_vfe_only_action(q, theta_est, y_blend)
                 else:
                     u, probe_mode, probe_gain, probe_u_ig_norm, probe_sigma_min = (
-                        compute_null_space_probe_action(q, theta_est, P_theta, Y_GOAL_HOLD)
+                        compute_null_space_probe_action(q, theta_est, P_theta, y_goal_hold)
                     )
             elif condition == "null_space_recovery":
                 if t < RECOVERY_START:
-                    u = compute_null_space_action(q, theta_est, P_theta, Y_GOAL_HOLD)
+                    u = compute_null_space_action(q, theta_est, P_theta, y_goal_hold)
                 else:
                     blend = (t - RECOVERY_START) / (CHANGE_STEP - RECOVERY_START)
-                    y_blend = (1.0 - blend) * Y_GOAL_HOLD + blend * Y_GOAL_TASK
+                    y_blend = (1.0 - blend) * y_goal_hold + blend * Y_GOAL_TASK
                     u = compute_vfe_only_action(q, theta_est, y_blend)
             else:  # null_space_posture: same Phase 1 as null_space
-                u = compute_null_space_action(q, theta_est, P_theta, Y_GOAL_HOLD)
+                u = compute_null_space_action(q, theta_est, P_theta, y_goal_hold)
         else:
             # Phase 2: task execution with FROZEN θ (no further calibration)
             if theta_frozen is None:
@@ -765,7 +805,7 @@ def run_one(seed, condition,
                 "posture" if condition in _posture_ctrl else "plain"
             )
             if ctrl == "posture":
-                u = compute_posture_task_action(q, theta_frozen, Y_GOAL_TASK)
+                u = compute_posture_task_action_ref(q, theta_frozen, Y_GOAL_TASK, q_ref)
             elif ctrl == "adaptive_posture":
                 u = compute_adaptive_posture_task_action(q, theta_frozen, Y_GOAL_TASK)
             elif ctrl == "manip_posture":
