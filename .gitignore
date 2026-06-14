@@ -19,6 +19,21 @@ __pycache__/
 aif_calib_robustness.md
 aif_occlusion_manipulator.md
 
+# Editor settings
+.vscode/
+
+# Paper / manuscript and research write-ups
+# Kept locally for the authors; excluded from the public code release.
+/paper/
+/docs/
+/plan/
+/survey/
+/tutorial/
+/obsolete/
+/ral_main.aux
+/ral_main.log
+/ral_main.pdf
+
 # Generated figures (reproducible via paper/make_figures.py)
 paper/figures/
 
