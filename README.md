@@ -359,12 +359,15 @@ The current result set supports this near-term plan:
 
 ## Citation
 
-If you use this software, please cite the archived release (see `CITATION.cff`)
-and the associated paper:
+If you use this software, please cite the archived release and the associated
+paper:
 
 > J. Kobayashi, "When Identifiability Is Not Enough: Terminal Controllability in
 > Task-Compatible Active Calibration," IEEE Robotics and Automation Letters, 2026
 > (accepted).
+
+Archived software (v1.0.0): [10.5281/zenodo.21390226](https://doi.org/10.5281/zenodo.21390226)
+(see `CITATION.cff`).
 
 ## License
 

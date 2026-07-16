@@ -3,7 +3,7 @@ message: "If you use this software, please cite the archived software release an
 title: "epistemic-active-calibration"
 type: software
 version: 1.0.0
-# doi: 10.5281/zenodo.XXXXXXXX   # version DOI — fill in after the first Zenodo archive
+doi: 10.5281/zenodo.21390226   # version DOI for v1.0.0
 authors:
   - family-names: Kobayashi
     given-names: Jun
