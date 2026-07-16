@@ -1,0 +1,23 @@
+{
+  "upload_type": "software",
+  "title": "epistemic-active-calibration: Terminal Controllability in Task-Compatible Active Calibration",
+  "description": "Simulation code for the paper \"When Identifiability Is Not Enough: Terminal Controllability in Task-Compatible Active Calibration\" (IEEE Robotics and Automation Letters, manuscript 26-2166). Includes the planar redundant-arm active-calibration stress test, finite-step task-compatible probing, terminal rollout-risk diagnostics, and the self-contained KUKA LBR iiwa 7-DoF case study.",
+  "creators": [
+    {
+      "name": "Kobayashi, Jun",
+      "orcid": "0009-0002-6318-2617",
+      "affiliation": "Kyushu Institute of Technology"
+    }
+  ],
+  "license": "Apache-2.0",
+  "access_right": "open",
+  "keywords": [
+    "active calibration",
+    "redundant manipulators",
+    "information gain",
+    "null-space control",
+    "terminal controllability",
+    "active inference",
+    "robot self-calibration"
+  ]
+}

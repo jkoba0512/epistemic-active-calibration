@@ -1,18 +1,18 @@
 """Step 1: Multi-seed statistical comparison of calibration policies.
 
-20 seeds × 30 steps で Phase 1 が単一 seed に依存した結果かどうかを検証する。
-同一条件（theta_init=[0.7,0.3], sigma_obs=0.01）で Phase 1 と直接比較可能。
+Check across 20 seeds x 30 steps whether the Phase 1 result depended on a single seed.
+Directly comparable to Phase 1 under identical conditions (theta_init=[0.7,0.3], sigma_obs=0.01).
 
 Conditions:
-  - random    : ランダム速度指令
-  - sinusoidal: 正弦波速度指令
-  - epistemic : 情報利得最大化 (FIM-only A-step)
+  - random    : random velocity command
+  - sinusoidal: sinusoidal velocity command
+  - epistemic : information-gain maximization (FIM-only A-step)
 
 Metrics:
   - RMSE per step       : mean ± 95% bootstrap CI
   - logdet(Σ_θ) per step: mean ± 95% bootstrap CI
-  - Convergence step    : first t where RMSE(t) < CONV_THRESH (分布・中央値・IQR)
-  - AUC RMSE            : Σ_t RMSE(t)  (総積算誤差、低いほど良い)
+  - Convergence step    : first t where RMSE(t) < CONV_THRESH (distribution, median, IQR)
+  - AUC RMSE            : Σ_t RMSE(t)  (total accumulated error, lower is better)
 
 Statistical tests:
   - Mann-Whitney U : epistemic vs random, epistemic vs sinusoidal

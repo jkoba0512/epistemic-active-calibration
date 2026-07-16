@@ -1,10 +1,10 @@
 """Unit tests for DEM D-step numerical stability.
 
 Tests:
-- local_linearization_step: 線形システムで解析解と一致するか
-- D-step with D operator: use_d_operator=True でも発散しないか
-- Euler vs local linearization: 局所線形化が Euler より速く収束するか
-- Generalized motion consistency: D 演算子あり/なしで推定値が近いか
+- local_linearization_step: matches the analytic solution for linear systems
+- D-step with D operator: does not diverge even with use_d_operator=True
+- Euler vs local linearization: local linearization converges faster than Euler
+- Generalized motion consistency: estimates agree with and without the D operator
 """
 
 import pytest
@@ -21,7 +21,7 @@ from src.dem.utils import local_linearization_step
 
 
 # ---------------------------------------------------------------------------
-# ヘルパー関数
+# Helper functions
 # ---------------------------------------------------------------------------
 
 def make_test_model(
@@ -29,14 +29,14 @@ def make_test_model(
     pi_y: float = 4.0,
     pi_x: float = 1.0,
 ) -> DEMModel:
-    """1D 線形テストモデル dx/dt = -x + v, y = x を生成する。"""
+    """Create a 1D linear test model dx/dt = -x + v, y = x."""
     A = jnp.array([[-1.0]])
     C = jnp.array([[1.0]])
     return LinearDEMModel(A, C, n_order=n_order, pi_y=pi_y, pi_x=pi_x)
 
 
 def make_observation(y0: float = 1.0, n_order: int = 4) -> jnp.ndarray:
-    """ゼロ次成分のみ非ゼロな一般化観測ベクトルを生成する。"""
+    """Create a generalized observation vector with only the zeroth-order component nonzero."""
     y_tilde = jnp.zeros(n_order)
     return y_tilde.at[0].set(y0)
 
@@ -46,12 +46,12 @@ def make_observation(y0: float = 1.0, n_order: int = 4) -> jnp.ndarray:
 # ---------------------------------------------------------------------------
 
 class TestLocalLinearizationLinear:
-    """local_linearization_step が線形システムで解析解と一致するかテスト。"""
+    """Test that local_linearization_step matches the analytic solution for linear systems."""
 
     def test_scalar_exponential_decay(self):
-        """スカラー線形系 dx/dt = -lambda * x の解析解と一致するか確認。
+        """Check agreement with the analytic solution of the scalar linear system dx/dt = -lambda * x.
 
-        解析解：Δx = x₀ * (e^(-lambda * dt) - 1)
+        Analytic solution: Δx = x₀ * (e^(-lambda * dt) - 1)
         """
         lam = 2.0
         x0 = jnp.array([1.5])
@@ -61,7 +61,7 @@ class TestLocalLinearizationLinear:
         dt = 0.1
         delta_x = local_linearization_step(f_val, J, dt, damping=0.0)
 
-        # 解析解
+        # Analytic solution
         expected = x0 * (jnp.exp(-lam * dt) - 1)
         np.testing.assert_allclose(
             np.array(delta_x), np.array(expected), rtol=1e-4,
@@ -69,7 +69,7 @@ class TestLocalLinearizationLinear:
         )
 
     def test_2d_linear_system(self):
-        """2次元線形系で行列指数関数の解析解と一致するか確認。"""
+        """Check agreement with the matrix-exponential analytic solution for a 2D linear system."""
         A = jnp.array([[-1.0, 0.5], [-0.5, -1.0]])
         x0 = jnp.array([1.0, 0.0])
         f_val = A @ x0
@@ -77,7 +77,7 @@ class TestLocalLinearizationLinear:
 
         delta_x = local_linearization_step(f_val, A, dt, damping=0.0)
 
-        # 解析解: Δx = (expm(A*dt) - I) x0 = expm(A*dt) x0 - x0
+        # Analytic solution: Δx = (expm(A*dt) - I) x0 = expm(A*dt) x0 - x0
         import jax.scipy.linalg
         expm_A_dt = jax.scipy.linalg.expm(A * dt)
         expected = expm_A_dt @ x0 - x0
@@ -88,10 +88,10 @@ class TestLocalLinearizationLinear:
         )
 
     def test_constant_input(self):
-        """定数入力系 dx/dt = A*x + b の解析解と一致するか確認。
+        """Check agreement with the analytic solution of the constant-input system dx/dt = A*x + b.
 
-        この場合 f(x0) = A*x0 + b で J = A。
-        解析解：Δx = A⁻¹(e^(A*dt) - I)(A*x0 + b)
+        Here f(x0) = A*x0 + b and J = A.
+        Analytic solution: Δx = A⁻¹(e^(A*dt) - I)(A*x0 + b)
         """
         A = jnp.array([[-2.0]])
         b = jnp.array([1.0])
@@ -101,7 +101,7 @@ class TestLocalLinearizationLinear:
 
         delta_x = local_linearization_step(f_val, A, dt, damping=0.0)
 
-        # 解析解
+        # Analytic solution
         import jax.scipy.linalg
         expm_Adt = jax.scipy.linalg.expm(A * dt)
         A_inv = jnp.linalg.inv(A)
@@ -113,7 +113,7 @@ class TestLocalLinearizationLinear:
         )
 
     def test_jit_compilable(self):
-        """local_linearization_step が jax.jit でコンパイル可能かテスト。"""
+        """Test that local_linearization_step is compilable with jax.jit."""
         J = jnp.array([[-1.0, 0.0], [0.0, -2.0]])
         f_val = jnp.array([1.0, 0.5])
 
@@ -130,20 +130,20 @@ class TestLocalLinearizationLinear:
 # ---------------------------------------------------------------------------
 
 class TestDStepStableWithDOperator:
-    """use_d_operator=True でも大きな dt で安定動作するかテスト。"""
+    """Test stable behavior with a large dt even when use_d_operator=True."""
 
     def test_stable_with_large_dt(self):
-        """dt=0.01 という大きなステップでも発散しないか確認。
+        """Check that it does not diverge even with a large step dt=0.01.
 
-        Euler 法では Hessian の最大固有値が 269 程度のとき
-        dt > 2/269 ≈ 0.0074 で不安定になるが、
-        局所線形化では安定であること。
+        With Euler, when the largest Hessian eigenvalue is around 269 the method
+        becomes unstable for dt > 2/269 ≈ 0.0074, whereas local linearization
+        remains stable.
         """
         model = make_test_model(n_order=4, pi_y=4.0, pi_x=1.0)
         d_step = DStep(
             model,
             kappa_mu=1.0,
-            dt=0.01,  # Euler 法では不安定な大きな dt
+            dt=0.01,  # large dt that is unstable for Euler
             n_iter=20,
             use_d_operator=True,
             use_local_linearization=True,
@@ -155,7 +155,7 @@ class TestDStepStableWithDOperator:
 
         mu_x_new, mu_v_new, vfe_final = d_step.run(mu_x0, mu_v0, y_tilde)
 
-        # 発散していないこと（有限値）
+        # Should not diverge (finite values)
         assert jnp.all(jnp.isfinite(mu_x_new)), (
             f"mu_x_tilde diverged with large dt=0.01: {mu_x_new}"
         )
@@ -165,13 +165,13 @@ class TestDStepStableWithDOperator:
         assert jnp.isfinite(vfe_final), f"VFE diverged: {vfe_final}"
 
     def test_no_divergence_over_iterations(self):
-        """多数のイテレーションでも発散しないか確認。"""
+        """Check that it does not diverge over many iterations."""
         model = make_test_model(n_order=4, pi_y=4.0, pi_x=1.0)
         d_step = DStep(
             model,
             kappa_mu=1.0,
             dt=0.01,
-            n_iter=1,  # 1ステップずつ確認
+            n_iter=1,  # check one step at a time
             use_d_operator=True,
             use_local_linearization=True,
         )
@@ -190,7 +190,7 @@ class TestDStepStableWithDOperator:
             assert jnp.isfinite(vfe), f"VFE diverged at step {i}: {vfe}"
 
     def test_vfe_decreases_with_d_operator(self):
-        """D 演算子あり局所線形化で VFE が初期値より減少するか確認。"""
+        """Check that VFE decreases from its initial value with the D operator and local linearization."""
         model = make_test_model(n_order=4, pi_y=4.0, pi_x=1.0)
         d_step = DStep(
             model,
@@ -220,13 +220,13 @@ class TestDStepStableWithDOperator:
 # ---------------------------------------------------------------------------
 
 class TestEulerVsLocalLinConvergence:
-    """局所線形化が Euler 法より速く収束するかテスト。"""
+    """Test that local linearization converges faster than Euler."""
 
     def test_local_lin_fewer_steps_to_converge(self):
-        """同じ dt で局所線形化の方が少ないステップで低 VFE に達するか確認。
+        """Check that, at the same dt, local linearization reaches a low VFE in fewer steps.
 
-        安全な dt 範囲（dt=0.001）での比較。
-        局所線形化は大きい「等価ステップ」を踏むため、より速く収束する。
+        Comparison within a safe dt range (dt=0.001).
+        Local linearization takes a larger "equivalent step", so it converges faster.
         """
         model = make_test_model(n_order=4, pi_y=4.0, pi_x=1.0)
         dt = 0.001
@@ -234,45 +234,45 @@ class TestEulerVsLocalLinConvergence:
 
         mu_x0 = jnp.ones(model.dim_x_tilde) * 2.0
         mu_v0 = jnp.zeros(model.dim_v_tilde)
-        y_tilde = make_observation(0.0, model.n_order)  # 観測 y=0 に向けて収束
+        y_tilde = make_observation(0.0, model.n_order)  # converge towards observation y=0
 
         vfe_init = float(compute_vfe(mu_x0, mu_v0, y_tilde, model))
 
-        # Euler（D 演算子なし、安定なグラジェント降下）
+        # Euler (no D operator, stable gradient descent)
         d_step_euler = DStep(
             model, kappa_mu=1.0, dt=dt, n_iter=n_steps,
             use_d_operator=False, use_local_linearization=False
         )
         _, _, vfe_euler = d_step_euler.run(mu_x0, mu_v0, y_tilde)
 
-        # 局所線形化（D 演算子あり）
+        # Local linearization (with D operator)
         d_step_ll = DStep(
             model, kappa_mu=1.0, dt=dt, n_iter=n_steps,
             use_d_operator=True, use_local_linearization=True
         )
         _, _, vfe_ll = d_step_ll.run(mu_x0, mu_v0, y_tilde)
 
-        # 両方とも初期 VFE より減少していること
+        # Both should decrease from the initial VFE
         assert vfe_euler < vfe_init, "Euler should reduce VFE"
         assert vfe_ll < vfe_init, "Local linearization should reduce VFE"
 
-        # 両方とも有限値であること
+        # Both should be finite
         assert jnp.isfinite(vfe_euler), f"Euler VFE is not finite: {vfe_euler}"
         assert jnp.isfinite(vfe_ll), f"Local linearization VFE is not finite: {vfe_ll}"
 
     def test_local_lin_stable_where_euler_diverges(self):
-        """Euler 法が不安定になる dt で局所線形化が安定か確認。
+        """Check that local linearization is stable at a dt where Euler is unstable.
 
-        dt=0.01 は Hessian の固有値が大きいとき Euler には危険だが、
-        局所線形化では安定。
+        dt=0.01 is dangerous for Euler when the Hessian eigenvalues are large,
+        but local linearization remains stable.
         """
-        model = make_test_model(n_order=4, pi_y=16.0, pi_x=1.0)  # 大きな pi_y
+        model = make_test_model(n_order=4, pi_y=16.0, pi_x=1.0)  # large pi_y
 
         mu_x0 = jnp.ones(model.dim_x_tilde) * 3.0
         mu_v0 = jnp.zeros(model.dim_v_tilde)
         y_tilde = make_observation(0.0, model.n_order)
 
-        # 局所線形化: dt=0.01 でも安定なはず
+        # Local linearization: should be stable even at dt=0.01
         d_step_ll = DStep(
             model, kappa_mu=1.0, dt=0.01, n_iter=50,
             use_d_operator=True, use_local_linearization=True
@@ -284,7 +284,7 @@ class TestEulerVsLocalLinConvergence:
         )
         assert jnp.isfinite(vfe_ll), f"VFE not finite: {vfe_ll}"
 
-        # VFE が減少していること
+        # VFE should decrease
         vfe_init = float(compute_vfe(mu_x0, mu_v0, y_tilde, model))
         assert vfe_ll < vfe_init, (
             f"Local linearization should reduce VFE: init={vfe_init:.4f}, final={vfe_ll:.4f}"
@@ -296,13 +296,13 @@ class TestEulerVsLocalLinConvergence:
 # ---------------------------------------------------------------------------
 
 class TestGeneralizedMotionConsistency:
-    """D 演算子あり/なしで最終的な推定値が近いかテスト。"""
+    """Test that the final estimates are close with and without the D operator."""
 
     def test_gradient_descent_and_local_lin_agree(self):
-        """同じ観測に対してグラジェント降下と局所線形化が近い推定値に収束するか確認。
+        """Check that gradient descent and local linearization converge to similar estimates for the same observation.
 
-        VFE の最小値点は積分手法によらず同じなので、十分な反復後に
-        ゼロ次状態推定が近い値になることを確認する。
+        The VFE minimizer is independent of the integration method, so after enough
+        iterations the zeroth-order state estimates should be close.
         """
         model = make_test_model(n_order=4, pi_y=4.0, pi_x=1.0)
         y_tilde = make_observation(1.0, model.n_order)
@@ -310,21 +310,21 @@ class TestGeneralizedMotionConsistency:
         mu_x0 = jnp.zeros(model.dim_x_tilde)
         mu_v0 = jnp.zeros(model.dim_v_tilde)
 
-        # グラジェント降下（D 演算子なし、多数の小さいステップ）
+        # Gradient descent (no D operator, many small steps)
         d_step_gd = DStep(
             model, kappa_mu=1.0, dt=0.001, n_iter=200,
             use_d_operator=False, use_local_linearization=False
         )
         mu_x_gd, _, vfe_gd = d_step_gd.run(mu_x0, mu_v0, y_tilde)
 
-        # 局所線形化（D 演算子あり）
+        # Local linearization (with D operator)
         d_step_ll = DStep(
             model, kappa_mu=1.0, dt=0.01, n_iter=50,
             use_d_operator=True, use_local_linearization=True
         )
         mu_x_ll, _, vfe_ll = d_step_ll.run(mu_x0, mu_v0, y_tilde)
 
-        # ゼロ次状態推定（最初の要素）が近いこと
+        # Zeroth-order state estimates (first element) should be close
         x0_gd = float(mu_x_gd[0])
         x0_ll = float(mu_x_ll[0])
 
@@ -333,14 +333,15 @@ class TestGeneralizedMotionConsistency:
             f"GD={x0_gd:.4f}, LL={x0_ll:.4f}"
         )
 
-        # 両方とも有限値であること
+        # Both should be finite
         assert jnp.all(jnp.isfinite(mu_x_gd)), "Gradient descent estimate not finite"
         assert jnp.all(jnp.isfinite(mu_x_ll)), "Local linearization estimate not finite"
 
     def test_both_modes_track_observation(self):
-        """両モードともに観測値に向けて推定値が動くか確認。
+        """Check that both modes move the estimate towards the observation.
 
-        観測 y=1.0 に対して、ゼロ次状態推定が初期値 0 から 1 に近づくこと。
+        For observation y=1.0, the zeroth-order state estimate should move from the
+        initial value 0 towards 1.
         """
         model = make_test_model(n_order=4, pi_y=8.0, pi_x=1.0)
         y_tilde = make_observation(1.0, model.n_order)
@@ -348,21 +349,21 @@ class TestGeneralizedMotionConsistency:
         mu_x0 = jnp.zeros(model.dim_x_tilde)
         mu_v0 = jnp.zeros(model.dim_v_tilde)
 
-        # グラジェント降下
+        # Gradient descent
         d_step_gd = DStep(
             model, kappa_mu=1.0, dt=0.001, n_iter=200,
             use_d_operator=False
         )
         mu_x_gd, _, _ = d_step_gd.run(mu_x0, mu_v0, y_tilde)
 
-        # 局所線形化
+        # Local linearization
         d_step_ll = DStep(
             model, kappa_mu=1.0, dt=0.01, n_iter=50,
             use_d_operator=True, use_local_linearization=True
         )
         mu_x_ll, _, _ = d_step_ll.run(mu_x0, mu_v0, y_tilde)
 
-        # 両方とも観測値（1.0）に向けて動いているか
+        # Both should move towards the observation (1.0)
         assert float(mu_x_gd[0]) > 0.1, (
             f"GD estimate should move towards y=1.0, got {float(mu_x_gd[0]):.4f}"
         )
@@ -371,20 +372,20 @@ class TestGeneralizedMotionConsistency:
         )
 
     def test_jit_compatible_both_modes(self):
-        """両モードの DStep が jax.jit でコンパイル可能かテスト。"""
+        """Test that DStep is compilable with jax.jit in both modes."""
         model = make_test_model(n_order=4, pi_y=4.0, pi_x=1.0)
         y_tilde = make_observation(1.0, model.n_order)
         mu_x0 = jnp.zeros(model.dim_x_tilde)
         mu_v0 = jnp.zeros(model.dim_v_tilde)
 
-        # グラジェント降下
+        # Gradient descent
         d_step_gd = DStep(model, kappa_mu=1.0, dt=0.001, n_iter=1,
                           use_d_operator=False)
-        # 局所線形化
+        # Local linearization
         d_step_ll = DStep(model, kappa_mu=1.0, dt=0.01, n_iter=1,
                           use_d_operator=True, use_local_linearization=True)
 
-        # 両方とも _euler_step は jax.jit 済みなので、単純に呼び出してテスト
+        # _euler_step is already jax.jit-compiled in both, so just call and test
         mu_x_gd, mu_v_gd = d_step_gd.run_single_step(mu_x0, mu_v0, y_tilde)
         mu_x_ll, mu_v_ll = d_step_ll.run_single_step(mu_x0, mu_v0, y_tilde)
 

@@ -1,0 +1,89 @@
+{
+  "seeds": 8,
+  "horizons": [
+    20,
+    50,
+    100,
+    200
+  ],
+  "results": {
+    "probe->plain": {
+      "20": {
+        "fail_task": 1.0,
+        "task_err_median": 1.0507850156422176,
+        "rmse_median": 0.019654703510771854,
+        "n": 8
+      },
+      "50": {
+        "fail_task": 1.0,
+        "task_err_median": 0.27531023231574003,
+        "rmse_median": 0.019654703510771854,
+        "n": 8
+      },
+      "100": {
+        "fail_task": 0.0,
+        "task_err_median": 0.003538300935511287,
+        "rmse_median": 0.019654703510771854,
+        "n": 8
+      },
+      "200": {
+        "fail_task": 0.0,
+        "task_err_median": 0.003523988524833515,
+        "rmse_median": 0.019654703510771854,
+        "n": 8
+      }
+    },
+    "probe->posture": {
+      "20": {
+        "fail_task": 1.0,
+        "task_err_median": 1.0547510893173857,
+        "rmse_median": 0.019654703510771854,
+        "n": 8
+      },
+      "50": {
+        "fail_task": 1.0,
+        "task_err_median": 0.4170154646621317,
+        "rmse_median": 0.019654703510771854,
+        "n": 8
+      },
+      "100": {
+        "fail_task": 0.0,
+        "task_err_median": 0.0034228569528242797,
+        "rmse_median": 0.019654703510771854,
+        "n": 8
+      },
+      "200": {
+        "fail_task": 0.0,
+        "task_err_median": 0.0035061320057273573,
+        "rmse_median": 0.019654703510771854,
+        "n": 8
+      }
+    },
+    "plain->plain": {
+      "20": {
+        "fail_task": 1.0,
+        "task_err_median": 0.19342958445535893,
+        "rmse_median": 0.08753167799726924,
+        "n": 8
+      },
+      "50": {
+        "fail_task": 0.0,
+        "task_err_median": 0.0064799487972403876,
+        "rmse_median": 0.08753167799726924,
+        "n": 8
+      },
+      "100": {
+        "fail_task": 0.0,
+        "task_err_median": 0.006449346577945098,
+        "rmse_median": 0.08753167799726924,
+        "n": 8
+      },
+      "200": {
+        "fail_task": 0.0,
+        "task_err_median": 0.006449346560088865,
+        "rmse_median": 0.08753167799726924,
+        "n": 8
+      }
+    }
+  }
+}

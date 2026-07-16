@@ -141,3 +141,44 @@ def fk_pose(q, delta=jnp.zeros(3)):
 # Convenience differentiable Jacobians (reused by the calibration pipeline).
 jac_q = jax.jacobian(lambda q, delta: fk(q, delta), argnums=0)      # d p_ee / d q   (3,7)
 jac_delta = jax.jacobian(lambda q, delta: fk(q, delta), argnums=1)  # d p_ee / d delta (3,3)
+
+
+# ---------------------------------------------------------------------------
+# Unknown link-length parametrisation (the configuration-dependent analogue of
+# the planar experiment's unknown link lengths).
+#
+# Tool offset alone is a poor unknown for the active-calibration story: with
+# isotropic EE-position noise its Fisher information FIM = sum_t R(q_t)^T Pi R(q_t)
+# = Pi * N * I is configuration-INDEPENDENT (rotations preserve the metric), so
+# there is no identifiability degeneracy for probing to break.  Scaling the
+# link translational offsets instead gives a configuration-dependent J_theta,
+# matching the planar setup where exploration is needed to identify the body.
+# ---------------------------------------------------------------------------
+
+LINK_SCALE_IDX = (3, 5, 6)          # distal joint offsets treated as unknown (0-indexed)
+N_LINK_PARAMS = len(LINK_SCALE_IDX)
+THETA_LINK_TRUE = jnp.ones(N_LINK_PARAMS)
+
+
+def _scaled_origins(theta):
+    """Multiply the translation part of the selected joint origins by theta."""
+    scales = jnp.ones(N_DOF).at[jnp.array(LINK_SCALE_IDX)].set(theta)
+    return ORIGINS.at[:, :3, 3].multiply(scales[:, None])
+
+
+def fk_links(q, theta):
+    """EE position for joints q (7,) and link-length scale factors theta (P,).
+
+    ``theta == 1`` recovers the nominal URDF kinematics.  Unlike the tool
+    offset, ``d p_ee / d theta`` depends on the configuration q, so calibration
+    quality is posture-dependent."""
+    T = jnp.eye(4)
+    origins = _scaled_origins(theta)
+    for i in range(N_DOF):
+        Rj = _axis_angle_matrix(AXES[i], q[i])
+        Tj = jnp.eye(4).at[:3, :3].set(Rj)
+        T = T @ origins[i] @ Tj
+    return T[:3, 3]
+
+
+jac_theta = jax.jacobian(fk_links, argnums=1)   # d p_ee / d theta  (3, P), config-dependent

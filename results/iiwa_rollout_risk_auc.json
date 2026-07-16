@@ -1,0 +1,283 @@
+{
+  "H_eval": 50,
+  "n": 30,
+  "n_fail": 8,
+  "auc": {
+    "rmse_at_change": 0.35795454545454547,
+    "inv_sigma_min": 0.44886363636363635,
+    "rollout_risk_hat": 0.9715909090909091,
+    "rollout_risk_oracle": 0.9715909090909091
+  },
+  "per_seed": [
+    {
+      "seed": 0,
+      "fail_task": false,
+      "rmse_at_change": 0.018593866913687817,
+      "task_err_final": 0.002129703980753559,
+      "r_rollout_hat": 0.0900099346158128,
+      "r_rollout_oracle": 0.09057669931178365,
+      "sigma_min_change": 0.03568274640435685
+    },
+    {
+      "seed": 1,
+      "fail_task": false,
+      "rmse_at_change": 0.022254821788530645,
+      "task_err_final": 0.03473102917003901,
+      "r_rollout_hat": 0.8521365881486159,
+      "r_rollout_oracle": 0.843637350277955,
+      "sigma_min_change": 0.039608977862796886
+    },
+    {
+      "seed": 2,
+      "fail_task": false,
+      "rmse_at_change": 0.0357763819722371,
+      "task_err_final": 0.008312537556009535,
+      "r_rollout_hat": 0.2720342621267251,
+      "r_rollout_oracle": 0.27607644888218474,
+      "sigma_min_change": 0.023997666698452713
+    },
+    {
+      "seed": 3,
+      "fail_task": false,
+      "rmse_at_change": 0.02120473743528147,
+      "task_err_final": 0.00473022328938555,
+      "r_rollout_hat": 0.23095211213310546,
+      "r_rollout_oracle": 0.23168672034316073,
+      "sigma_min_change": 0.029243158517982197
+    },
+    {
+      "seed": 4,
+      "fail_task": false,
+      "rmse_at_change": 0.018178262133093995,
+      "task_err_final": 0.0032465760065482374,
+      "r_rollout_hat": 0.13901017272503113,
+      "r_rollout_oracle": 0.14618053372335457,
+      "sigma_min_change": 0.02053912290190439
+    },
+    {
+      "seed": 5,
+      "fail_task": false,
+      "rmse_at_change": 0.02132494001728437,
+      "task_err_final": 0.04790625909387896,
+      "r_rollout_hat": 0.8289914239654496,
+      "r_rollout_oracle": 0.8139634944415305,
+      "sigma_min_change": 0.049911920145741875
+    },
+    {
+      "seed": 6,
+      "fail_task": false,
+      "rmse_at_change": 0.01760249816445129,
+      "task_err_final": 0.0032097114677629114,
+      "r_rollout_hat": 0.2902854875287486,
+      "r_rollout_oracle": 0.2906335122607185,
+      "sigma_min_change": 0.02437799866209424
+    },
+    {
+      "seed": 7,
+      "fail_task": false,
+      "rmse_at_change": 0.008344339526740954,
+      "task_err_final": 0.023335571098426305,
+      "r_rollout_hat": 0.7423826873786227,
+      "r_rollout_oracle": 0.7353655151592235,
+      "sigma_min_change": 0.03219550096983167
+    },
+    {
+      "seed": 8,
+      "fail_task": true,
+      "rmse_at_change": 0.00942831475834325,
+      "task_err_final": 0.05373437564350669,
+      "r_rollout_hat": 0.9594797729010671,
+      "r_rollout_oracle": 0.961948595516857,
+      "sigma_min_change": 0.0254453859383136
+    },
+    {
+      "seed": 9,
+      "fail_task": false,
+      "rmse_at_change": 0.003400918794435413,
+      "task_err_final": 0.0016143649707785848,
+      "r_rollout_hat": 0.5240735844956173,
+      "r_rollout_oracle": 0.522265585012556,
+      "sigma_min_change": 0.03375345808259416
+    },
+    {
+      "seed": 10,
+      "fail_task": true,
+      "rmse_at_change": 0.017932625386821686,
+      "task_err_final": 0.38176463736381466,
+      "r_rollout_hat": 1.0160559815218726,
+      "r_rollout_oracle": 1.0160679252098446,
+      "sigma_min_change": 0.03266310195929592
+    },
+    {
+      "seed": 11,
+      "fail_task": true,
+      "rmse_at_change": 0.019071452728466613,
+      "task_err_final": 0.4005343383451722,
+      "r_rollout_hat": 1.10673914985298,
+      "r_rollout_oracle": 1.1071086661999956,
+      "sigma_min_change": 0.03829248451844836
+    },
+    {
+      "seed": 12,
+      "fail_task": true,
+      "rmse_at_change": 0.04349663991325304,
+      "task_err_final": 0.2434096906617203,
+      "r_rollout_hat": 0.9710341164763937,
+      "r_rollout_oracle": 0.9699963390144838,
+      "sigma_min_change": 0.024530287948367684
+    },
+    {
+      "seed": 13,
+      "fail_task": false,
+      "rmse_at_change": 0.022047735753793124,
+      "task_err_final": 0.005135018115320371,
+      "r_rollout_hat": 0.17885160703895633,
+      "r_rollout_oracle": 0.1754654090622631,
+      "sigma_min_change": 0.04888477589525289
+    },
+    {
+      "seed": 14,
+      "fail_task": true,
+      "rmse_at_change": 0.01817479888999268,
+      "task_err_final": 0.3898261015946521,
+      "r_rollout_hat": 1.0176860420133487,
+      "r_rollout_oracle": 1.0234673945773136,
+      "sigma_min_change": 0.01989255380212099
+    },
+    {
+      "seed": 15,
+      "fail_task": false,
+      "rmse_at_change": 0.05123542195225613,
+      "task_err_final": 0.0097879278697164,
+      "r_rollout_hat": 0.3096292374149163,
+      "r_rollout_oracle": 0.3086621608798757,
+      "sigma_min_change": 0.038100050239418606
+    },
+    {
+      "seed": 16,
+      "fail_task": false,
+      "rmse_at_change": 0.010874849699378072,
+      "task_err_final": 0.0286783192921003,
+      "r_rollout_hat": 0.9049536620056854,
+      "r_rollout_oracle": 0.8997780528667739,
+      "sigma_min_change": 0.020302009176496705
+    },
+    {
+      "seed": 17,
+      "fail_task": false,
+      "rmse_at_change": 0.025240984028134846,
+      "task_err_final": 0.0027700100800843504,
+      "r_rollout_hat": 0.40476064179474697,
+      "r_rollout_oracle": 0.40706016673003337,
+      "sigma_min_change": 0.01840971187813704
+    },
+    {
+      "seed": 18,
+      "fail_task": true,
+      "rmse_at_change": 0.020219087930354953,
+      "task_err_final": 0.24774196541303922,
+      "r_rollout_hat": 0.9435064386601228,
+      "r_rollout_oracle": 0.9433914025711677,
+      "sigma_min_change": 0.035992908840375475
+    },
+    {
+      "seed": 19,
+      "fail_task": false,
+      "rmse_at_change": 0.011461869146712204,
+      "task_err_final": 0.0028513303041131995,
+      "r_rollout_hat": 0.009023532483522449,
+      "r_rollout_oracle": 0.008075896553009061,
+      "sigma_min_change": 0.023459529698609715
+    },
+    {
+      "seed": 20,
+      "fail_task": false,
+      "rmse_at_change": 0.02494618077087288,
+      "task_err_final": 0.010968282918203546,
+      "r_rollout_hat": 0.8158245112141518,
+      "r_rollout_oracle": 0.8303944652816213,
+      "sigma_min_change": 0.03657070107167356
+    },
+    {
+      "seed": 21,
+      "fail_task": false,
+      "rmse_at_change": 0.009025326638700475,
+      "task_err_final": 0.0014522692673373141,
+      "r_rollout_hat": 0.2035994338037785,
+      "r_rollout_oracle": 0.19931845241067842,
+      "sigma_min_change": 0.04091009639355674
+    },
+    {
+      "seed": 22,
+      "fail_task": true,
+      "rmse_at_change": 0.010179028241887895,
+      "task_err_final": 0.05512346143541315,
+      "r_rollout_hat": 0.7816892915240762,
+      "r_rollout_oracle": 0.7806550575950387,
+      "sigma_min_change": 0.05210562300560562
+    },
+    {
+      "seed": 23,
+      "fail_task": false,
+      "rmse_at_change": 0.012036798949230655,
+      "task_err_final": 0.014583152206227393,
+      "r_rollout_hat": 0.7922201207763243,
+      "r_rollout_oracle": 0.8083012154443168,
+      "sigma_min_change": 0.04854518826721736
+    },
+    {
+      "seed": 24,
+      "fail_task": false,
+      "rmse_at_change": 0.055254532756035986,
+      "task_err_final": 0.010875193947047229,
+      "r_rollout_hat": 0.20578426888599377,
+      "r_rollout_oracle": 0.20704288706098628,
+      "sigma_min_change": 0.027316968071117685
+    },
+    {
+      "seed": 25,
+      "fail_task": false,
+      "rmse_at_change": 0.019088803794096134,
+      "task_err_final": 0.000441386904091351,
+      "r_rollout_hat": 0.2628373614055925,
+      "r_rollout_oracle": 0.270834702662681,
+      "sigma_min_change": 0.04620068958485788
+    },
+    {
+      "seed": 26,
+      "fail_task": false,
+      "rmse_at_change": 0.02093490155881222,
+      "task_err_final": 0.0045772509679559694,
+      "r_rollout_hat": 0.7704670008331509,
+      "r_rollout_oracle": 0.7725097178532291,
+      "sigma_min_change": 0.015978168061445645
+    },
+    {
+      "seed": 27,
+      "fail_task": true,
+      "rmse_at_change": 0.004285271711655651,
+      "task_err_final": 0.47563020770477726,
+      "r_rollout_hat": 1.1402365226353612,
+      "r_rollout_oracle": 1.1401695676663608,
+      "sigma_min_change": 0.04637573755380106
+    },
+    {
+      "seed": 28,
+      "fail_task": false,
+      "rmse_at_change": 0.04875001626616982,
+      "task_err_final": 0.010831111217772074,
+      "r_rollout_hat": 0.01623683712246655,
+      "r_rollout_oracle": 0.021326228622403364,
+      "sigma_min_change": 0.013667816631600774
+    },
+    {
+      "seed": 29,
+      "fail_task": false,
+      "rmse_at_change": 0.0150175626791551,
+      "task_err_final": 0.0037732208629551738,
+      "r_rollout_hat": 0.04740582609324158,
+      "r_rollout_oracle": 0.04461303217709892,
+      "sigma_min_change": 0.05316028960879947
+    }
+  ]
+}

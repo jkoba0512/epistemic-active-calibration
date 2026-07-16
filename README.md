@@ -100,13 +100,6 @@ results/
   lambda_sweep.json               Summary metrics for lambda sweep
   sensitivity_2dof_arm.csv        Existing SO-101/MuJoCo sensitivity sweep data
   *.png                           Generated experiment figures
-
-plan/
-  research-plan-20260417.md       Research plan and phased roadmap
-
-tutorial/
-  epistemic_active_calibration_tutorial.typ
-  epistemic_active_calibration_tutorial.pdf
 ```
 
 ## Setup
@@ -364,10 +357,17 @@ The current result set supports this near-term plan:
 - Real robot safety constraints, latency, friction, calibration targets, and
   sensor synchronization are not yet handled.
 
-## Related Documents
+## Citation
 
-- `plan/research-plan-20260417.md`
-- `tutorial/epistemic_active_calibration_tutorial.typ`
-- `tutorial/epistemic_active_calibration_tutorial.pdf`
-- `survey/literature_survey_codex.md`
-- `survey/discussion_1_codex.md`
+If you use this software, please cite the archived release (see `CITATION.cff`)
+and the associated paper:
+
+> J. Kobayashi, "When Identifiability Is Not Enough: Terminal Controllability in
+> Task-Compatible Active Calibration," IEEE Robotics and Automation Letters, 2026
+> (accepted).
+
+## License
+
+The source code in this repository is licensed under the Apache License 2.0
+(see `LICENSE`). The vendored KUKA LBR iiwa model under `assets/kuka_iiwa/` is
+third-party content distributed under the BSD 2-Clause license; see `NOTICE`.

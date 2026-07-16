@@ -1,0 +1,34 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the archived software release and the associated paper."
+title: "epistemic-active-calibration"
+type: software
+version: 1.0.0
+# doi: 10.5281/zenodo.XXXXXXXX   # version DOI — fill in after the first Zenodo archive
+authors:
+  - family-names: Kobayashi
+    given-names: Jun
+    orcid: "https://orcid.org/0009-0002-6318-2617"
+    affiliation: Kyushu Institute of Technology
+repository-code: "https://github.com/jkoba0512/epistemic-active-calibration"
+url: "https://github.com/jkoba0512/epistemic-active-calibration"
+license: Apache-2.0
+keywords:
+  - active calibration
+  - redundant manipulators
+  - information gain
+  - null-space control
+  - terminal controllability
+  - active inference
+  - robot self-calibration
+preferred-citation:
+  type: article
+  title: "When Identifiability Is Not Enough: Terminal Controllability in Task-Compatible Active Calibration"
+  # doi:   # RA-L article DOI — fill in after publication
+  authors:
+    - family-names: Kobayashi
+      given-names: Jun
+      orcid: "https://orcid.org/0009-0002-6318-2617"
+      affiliation: Kyushu Institute of Technology
+  journal: "IEEE Robotics and Automation Letters"
+  year: 2026
+  notes: "Accepted; manuscript 26-2166."

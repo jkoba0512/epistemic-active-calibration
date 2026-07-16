@@ -1,7 +1,7 @@
 [project]
 name = "epistemic-active-calibration"
-version = "0.1.0"
-description = "Add your description here"
+version = "1.0.0"
+description = "Active calibration under observation degeneracy: task-compatible probing and terminal finite-horizon controllability for redundant manipulators."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

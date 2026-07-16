@@ -1,0 +1,13 @@
+# Exclude manuscript and non-public research write-ups from `git archive`
+# (GitHub/Zenodo source archives). These directories are already untracked;
+# export-ignore is a safeguard in case any are re-added.
+paper/ export-ignore
+docs/ export-ignore
+plan/ export-ignore
+survey/ export-ignore
+tutorial/ export-ignore
+obsolete/ export-ignore
+
+# Development-only files not needed in release archives
+.gitattributes export-ignore
+.gitignore export-ignore
